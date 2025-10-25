@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Nori Playground</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: radial-gradient(120% 120% at 50% 20%, #1f1f1f, #0f0f0f);
+        font-family: "JetBrains Mono", monospace;
+        color: #f5f5f5;
+      }
+
+      .card {
+        width: min(420px, calc(100vw - 48px));
+        padding: 32px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.06);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        text-align: center;
+        box-shadow: 0 30px 70px rgba(0, 0, 0, 0.35);
+      }
+
+      button {
+        padding: 12px 20px;
+        border-radius: 999px;
+        border: none;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 500;
+        background: linear-gradient(135deg, #4ba779, #3f9270);
+        color: #0f1511;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 30px rgba(75, 167, 121, 0.35);
+      }
+
+      button:active {
+        transform: translateY(0);
+        box-shadow: none;
+      }
+
+      code {
+        background: rgba(0, 0, 0, 0.35);
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+    </style>
+    <script>
+      (() => {
+        const messageListeners = [];
+        const storageKey = "nori_note";
+        const storageNamespace = "nori_playground";
+
+        const readStorage = () => {
+          try {
+            const raw = localStorage.getItem(storageNamespace);
+            return raw ? JSON.parse(raw) : {};
+          } catch {
+            return {};
+          }
+        };
+
+        const writeStorage = (data) => {
+          try {
+            localStorage.setItem(storageNamespace, JSON.stringify(data));
+          } catch {
+            // ignore quota errors in playground mode
+          }
+        };
+
+        window.chrome = {
+          runtime: {
+            onMessage: {
+              addListener: (fn) => {
+                messageListeners.push(fn);
+              },
+            },
+            getURL: (path) => path,
+            lastError: null,
+          },
+          storage: {
+            sync: {
+              get: (keys, callback) => {
+                const store = readStorage();
+                const result = {};
+
+                if (Array.isArray(keys)) {
+                  keys.forEach((key) => {
+                    result[key] = store[key];
+                  });
+                } else if (typeof keys === "string") {
+                  result[keys] = store[keys];
+                } else if (typeof keys === "object") {
+                  Object.keys(keys).forEach((key) => {
+                    result[key] = store[key] ?? keys[key];
+                  });
+                } else {
+                  Object.assign(result, store);
+                }
+
+                callback(result);
+              },
+              set: (items, callback = () => {}) => {
+                const store = readStorage();
+                Object.assign(store, items);
+                writeStorage(store);
+                callback();
+              },
+              remove: (keys, callback = () => {}) => {
+                const store = readStorage();
+                if (Array.isArray(keys)) {
+                  keys.forEach((key) => {
+                    delete store[key];
+                  });
+                } else if (typeof keys === "string") {
+                  delete store[keys];
+                }
+                writeStorage(store);
+                callback();
+              },
+            },
+          },
+        };
+
+        window.__toggleNoriOverlay = () => {
+          messageListeners.forEach((listener) => {
+            try {
+              listener({ action: "toggleOverlay" }, {}, () => {});
+            } catch (error) {
+              console.error("Nori listener error:", error);
+            }
+          });
+        };
+
+        window.addEventListener("DOMContentLoaded", () => {
+          const button = document.querySelector("[data-toggle]");
+          button.addEventListener("click", () => {
+            window.__toggleNoriOverlay();
+          });
+
+          window.addEventListener("keydown", (event) => {
+            if (event.code === "KeyW" && (event.altKey || event.metaKey)) {
+              event.preventDefault();
+              window.__toggleNoriOverlay();
+            }
+          });
+        });
+      })();
+    </script>
+    <script defer src="content.js"></script>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Nori Playground</h1>
+      <p>Preview the overlay without installing the extension.</p>
+      <p>
+        Press <code>Alt/Option + W</code> or click below to toggle.
+      </p>
+      <p>
+        Try closing the overlay to build up history, lock favorites, and export Markdown right from the preview.
+      </p>
+      <button type="button" data-toggle>Toggle Nori</button>
+    </div>
+  </body>
+</html>

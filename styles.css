@@ -1,0 +1,415 @@
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap");
+
+#nori-overlay {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(540px, calc(100vw - 32px));
+  height: min(320px, calc(100vh - 32px));
+  background: rgba(20, 20, 20, 0.5);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border-radius: 16px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  overflow: hidden;
+  z-index: 2147483646;
+}
+
+#nori-overlay.fade-out {
+  pointer-events: none;
+}
+
+.nori-surface {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.nori-sidebar {
+  width: 220px;
+  background: rgba(12, 12, 12, 0.6);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  inset: 0 auto 0 0;
+  transform: translate3d(-110%, 0, 0);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.2s ease;
+  will-change: transform, opacity;
+}
+
+#nori-overlay.sidebar-open .nori-sidebar {
+  transform: translate3d(0, 0, 0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#nori-overlay.sidebar-open .nori-main {
+  margin-left: 220px;
+}
+
+.nori-sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  margin: 12px 16px 10px;
+  min-height: 28px;
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.nori-sidebar__title {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(235, 235, 235, 0.52);
+}
+
+.nori-sidebar__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nori-sidebar__reveal-zone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 46px;
+}
+
+.nori-sidebar.show-controls .nori-sidebar__header {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.nori-sidebar__list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.nori-sidebar__list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+.nori-history-empty {
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(220, 220, 220, 0.6);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  text-align: left;
+}
+
+.nori-history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(28, 28, 28, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 12px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.nori-history-item.active {
+  border-color: rgba(79, 167, 121, 0.9);
+  box-shadow: 0 0 0 1px rgba(79, 167, 121, 0.35);
+}
+
+.nori-history-item.locked {
+  border-color: rgba(255, 215, 141, 0.42);
+  box-shadow: 0 0 0 1px rgba(255, 215, 141, 0.2);
+}
+
+.nori-history-item.locked .nori-history-time {
+  color: rgba(255, 215, 141, 0.65);
+}
+
+.nori-history-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nori-history-time {
+  font-size: 11px;
+  color: rgba(220, 220, 220, 0.55);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.nori-history-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nori-history-body {
+  background: transparent;
+  border: none;
+  text-align: left;
+  padding: 0;
+  color: rgba(232, 232, 232, 0.9);
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nori-history-body:hover,
+.nori-history-body:focus-visible {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.nori-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  backdrop-filter: blur(4px);
+  margin-left: 0;
+  transition: margin-left 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: margin-left;
+}
+
+.nori-control-zone {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 40px;
+  pointer-events: auto;
+  background: transparent;
+  z-index: 2;
+  cursor: default;
+}
+
+.nori-control-zone--top {
+  top: 0;
+}
+
+.nori-control-zone--bottom {
+  bottom: 0;
+  height: 52px;
+}
+
+.nori-main__header {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  right: 16px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: none;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 3;
+}
+
+.nori-brand {
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(235, 235, 235, 0.45);
+  justify-self: center;
+}
+
+.nori-icon-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(235, 235, 235, 0.85);
+  border-radius: 10px;
+  width: 28px;
+  height: 28px;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease,
+    box-shadow 0.2s ease;
+  padding: 0;
+}
+
+.nori-icon-btn svg {
+  display: block;
+}
+
+.nori-icon-btn--back {
+  width: 32px;
+  height: 28px;
+  border-radius: 12px;
+}
+
+.nori-icon-btn:hover,
+.nori-icon-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+}
+
+#nori-textarea {
+  flex: 1;
+  background: transparent;
+  color: #e8e8e8;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 48px 22px 48px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+#nori-textarea::placeholder {
+  color: rgba(232, 232, 232, 0.5);
+}
+
+#nori-textarea::-webkit-scrollbar {
+  width: 6px;
+}
+
+#nori-textarea::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+.nori-main__footer {
+  position: absolute;
+  bottom: 14px;
+  left: 16px;
+  right: 16px;
+  padding: 0;
+  display: flex;
+  justify-content: flex-end;
+  border: none;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 3;
+}
+
+.nori-export-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(235, 235, 235, 0.85);
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease,
+    box-shadow 0.2s ease;
+  padding: 0;
+}
+
+.nori-export-btn svg {
+  stroke: currentColor;
+  width: 16px;
+  height: 16px;
+}
+
+.nori-export-btn:hover,
+.nori-export-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+}
+
+#nori-overlay.top-hover .nori-main__header {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+#nori-overlay.bottom-hover .nori-main__footer {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.nori-toast {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translate(-50%, 24px);
+  background: rgba(24, 24, 24, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 10px 18px;
+  color: rgba(245, 245, 245, 0.9);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.nori-toast.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.fade-in {
+  animation: fadeIn 0.25s ease forwards;
+}
+
+.fade-out {
+  animation: fadeOut 0.25s ease forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.97);
+  }
+}
