@@ -4,12 +4,17 @@ const CLOSE_BUTTON_ID = "nori-close";
 const STORAGE_KEY = "nori_note";
 const HISTORY_KEY = "nori_notes";
 const HISTORY_LIMIT = 50;
-const ANIMATION_DURATION_MS = 250;
+const ANIMATION_DURATION_MS = 320;
 
 const HISTORY_TOGGLE_ID = "nori-history-toggle";
 const SIDEBAR_ID = "nori-sidebar";
 const HISTORY_LIST_ID = "nori-history-list";
 const EXPORT_BUTTON_ID = "nori-export";
+const SAVE_BUTTON_ID = "nori-save";
+const NEW_NOTE_BUTTON_ID = "nori-new-note";
+const MAIN_NEW_NOTE_BUTTON_ID = "nori-main-new-note";
+const SEARCH_BUTTON_ID = "nori-search";
+const SEARCH_INPUT_ID = "nori-search-input";
 const TOAST_ID = "nori-toast";
 const SIDEBAR_OPEN_CLASS = "sidebar-open";
 
@@ -19,6 +24,9 @@ const ICON_SVGS = {
   unlock: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M9 11V8a3 3 0 0 1 5.5-1.5"/></svg>`,
   delete: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7h14"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 7l1-3h6l1 3"/><path d="M6 7l.5 13h11L18 7"/></svg>`,
   export: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v11"/><path d="M8 9l4-4 4 4"/><path d="M5 16v1.5A1.5 1.5 0 0 0 6.5 19h11a1.5 1.5 0 0 0 1.5-1.5V16"/></svg>`,
+  save: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4 10-10"/></svg>`,
+  plus: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
+  search: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="5"/><path d="M16 16l4 4"/></svg>`,
   back: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.6 6v12" stroke-width="1.5"/><path d="M18 12h-6.1" stroke-width="1.4"/><path d="M15 8.5 11.9 12l3.1 3.5" stroke-width="1.7"/></svg>`,
 };
 
@@ -43,6 +51,8 @@ const storageSet = (items) =>
 let historyState = [];
 let currentOverlay = null;
 let currentNoteId = null;
+let historyFilter = "";
+let historyLoadSequence = 0;
 
 const handleKeydown = (event) => {
   if (event.key === "Escape") {
@@ -135,16 +145,29 @@ const renderHistoryList = () => {
 
   container.textContent = "";
 
-  if (!historyState.length) {
+  const source = historyFilter
+    ? historyState.filter((note) => {
+        const content = note.content?.toLowerCase() || "";
+        const timestampLabel = formatTimestamp(note.updatedAt || note.createdAt)
+          .toLowerCase();
+        return (
+          content.includes(historyFilter) ||
+          timestampLabel.includes(historyFilter)
+        );
+      })
+    : historyState;
+
+  if (!source.length) {
     const empty = document.createElement("p");
     empty.className = "nori-history-empty";
-    empty.textContent =
-      "Your saved notes will collect here once you close the overlay.";
+    empty.textContent = historyFilter
+      ? "No notes match your search."
+      : "Your saved notes will collect here once you close the overlay.";
     container.appendChild(empty);
     return;
   }
 
-  historyState.forEach((note) => {
+  source.forEach((note) => {
     const item = document.createElement("article");
     item.className = "nori-history-item";
     item.dataset.noteId = note.id;
@@ -213,6 +236,17 @@ const setSidebarState = (open) => {
   } else {
     currentOverlay.classList.remove(SIDEBAR_OPEN_CLASS);
     sidebar.setAttribute("aria-hidden", "true");
+    sidebar.classList.remove("search-active");
+    const searchInput = currentOverlay.querySelector(`#${SEARCH_INPUT_ID}`);
+    if (searchInput) {
+      searchInput.value = "";
+    }
+    historyFilter = "";
+    renderHistoryList();
+    const editorWrapper = currentOverlay.querySelector(".nori-main");
+    if (editorWrapper && !editorWrapper.dataset.pendingReveal) {
+      editorWrapper.classList.remove("nori-editor-hidden");
+    }
     toggle?.setAttribute("aria-expanded", "false");
   }
 };
@@ -321,6 +355,12 @@ const closeOverlay = async () => {
 
   overlay.dataset.closing = "true";
   resetCurrentNoteContext();
+  historyFilter = "";
+  historyLoadSequence += 1;
+  const editorWrapper = overlay.querySelector(".nori-main");
+  editorWrapper?.classList.remove("nori-note-flash");
+  editorWrapper?.classList.remove("nori-editor-hidden");
+  editorWrapper?.removeAttribute("data-pending-reveal");
 
   overlay.classList.remove("fade-in");
   overlay.classList.add("fade-out");
@@ -356,13 +396,66 @@ const handleHistoryAction = async (event) => {
   if (action === "load-note") {
     const note = historyState[noteIndex];
     if (textarea) {
-      textarea.value = note.content;
-      textarea.focus({ preventScroll: true });
-      currentNoteId = note.id;
-      await persistCurrentValue(note.content);
-      renderHistoryList();
-      showToast("Loaded note into editor.");
+      const editorWrapper = currentOverlay?.querySelector(".nori-main");
+      editorWrapper?.classList.remove("nori-note-flash");
+
+      const sequence = ++historyLoadSequence;
+
+      const applyLoadedNote = async () => {
+        if (sequence !== historyLoadSequence) {
+          return;
+        }
+        textarea.value = note.content;
+        textarea.focus({ preventScroll: true });
+        currentNoteId = note.id;
+        await persistCurrentValue(note.content);
+        renderHistoryList();
+        showToast("Loaded note into editor.");
+        if (editorWrapper) {
+          editorWrapper.classList.remove("nori-editor-hidden");
+          editorWrapper.removeAttribute("data-pending-reveal");
+        }
+      };
+
+      const sidebarElement = currentOverlay?.querySelector(`#${SIDEBAR_ID}`);
+      const wasOpen = currentOverlay?.classList.contains(SIDEBAR_OPEN_CLASS);
+
+      const waitForSidebarClose = () =>
+        new Promise((resolve) => {
+          if (!wasOpen || !sidebarElement) {
+            resolve();
+            return;
+          }
+
+          const cleanup = () => {
+            sidebarElement.removeEventListener("transitionend", handler);
+            resolve();
+          };
+
+          const handler = (event) => {
+            if (event.target === sidebarElement && event.propertyName === "transform") {
+              cleanup();
+            }
+          };
+
+          sidebarElement.addEventListener("transitionend", handler);
+          window.setTimeout(cleanup, ANIMATION_DURATION_MS);
+        });
+
+      if (editorWrapper) {
+        if (wasOpen) {
+          editorWrapper.dataset.pendingReveal = "true";
+          editorWrapper.classList.add("nori-editor-hidden");
+        } else {
+          editorWrapper.classList.remove("nori-editor-hidden");
+          editorWrapper.removeAttribute("data-pending-reveal");
+        }
+      }
+
       setSidebarState(false);
+
+      await waitForSidebarClose();
+      await applyLoadedNote();
     }
     return;
   }
@@ -391,6 +484,72 @@ const handleHistoryAction = async (event) => {
     renderHistoryList();
     showToast("Note deleted.");
   }
+};
+
+const saveCurrentNote = async () => {
+  if (!currentOverlay) {
+    return;
+  }
+
+  const textarea = currentOverlay.querySelector(`#${TEXTAREA_ID}`);
+  if (!textarea) {
+    return;
+  }
+
+  const editorWrapper = textarea.closest(".nori-main");
+  editorWrapper?.classList.remove("nori-editor-hidden");
+  editorWrapper?.removeAttribute("data-pending-reveal");
+
+  const saved = await handleNoteFinalization(textarea.value);
+  if (!saved) {
+    return;
+  }
+
+  renderHistoryList();
+  textarea.focus({ preventScroll: true });
+  showToast("Note saved.");
+};
+
+const startNewNote = async () => {
+  if (!currentOverlay) {
+    return;
+  }
+
+  historyLoadSequence += 1;
+
+  const textarea = currentOverlay.querySelector(`#${TEXTAREA_ID}`);
+  if (!textarea) {
+    return;
+  }
+
+  const editorWrapper = textarea.closest(".nori-main");
+  if (editorWrapper) {
+    editorWrapper.classList.remove("nori-note-flash");
+    editorWrapper.classList.remove("nori-editor-hidden");
+    editorWrapper.removeAttribute("data-pending-reveal");
+  }
+
+  const finalized = await handleNoteFinalization(textarea.value);
+  if (!finalized) {
+    return;
+  }
+
+  resetCurrentNoteContext();
+  textarea.value = "";
+  await persistCurrentValue("");
+  renderHistoryList();
+  requestAnimationFrame(() => {
+    if (!editorWrapper) {
+      return;
+    }
+    editorWrapper.classList.add("nori-note-flash");
+    const handleAnimationEnd = () => {
+      editorWrapper.classList.remove("nori-note-flash");
+    };
+    editorWrapper.addEventListener("animationend", handleAnimationEnd, { once: true });
+  });
+  textarea.focus({ preventScroll: true });
+  showToast("New note ready.");
 };
 
 const exportHistoryToMarkdown = () => {
@@ -443,7 +602,14 @@ const attachOverlayEvents = () => {
   const closeButton = currentOverlay.querySelector(`#${CLOSE_BUTTON_ID}`);
   const historyToggle = currentOverlay.querySelector(`#${HISTORY_TOGGLE_ID}`);
   const historyList = currentOverlay.querySelector(`#${HISTORY_LIST_ID}`);
+  const saveButton = currentOverlay.querySelector(`#${SAVE_BUTTON_ID}`);
   const exportButton = currentOverlay.querySelector(`#${EXPORT_BUTTON_ID}`);
+  const mainNewNoteButton = currentOverlay.querySelector(`#${MAIN_NEW_NOTE_BUTTON_ID}`);
+  const newNoteButton = currentOverlay.querySelector(`#${NEW_NOTE_BUTTON_ID}`);
+  const searchButton = currentOverlay.querySelector(`#${SEARCH_BUTTON_ID}`);
+  const searchPanel = currentOverlay.querySelector("#nori-search-panel");
+  const searchInput = currentOverlay.querySelector(`#${SEARCH_INPUT_ID}`);
+  const searchClearButton = currentOverlay.querySelector("#nori-search-clear");
   const sidebarClose = currentOverlay.querySelector("#nori-sidebar-close");
   const sidebar = currentOverlay.querySelector(".nori-sidebar");
   const sidebarReveal = currentOverlay.querySelector(".nori-sidebar__reveal-zone");
@@ -475,8 +641,45 @@ const attachOverlayEvents = () => {
     void handleHistoryAction(event);
   });
 
+  saveButton?.addEventListener("click", () => {
+    void saveCurrentNote();
+  });
+
   exportButton?.addEventListener("click", () => {
     exportHistoryToMarkdown();
+  });
+
+  mainNewNoteButton?.addEventListener("click", () => {
+    void startNewNote();
+  });
+
+  newNoteButton?.addEventListener("click", () => {
+    void startNewNote();
+  });
+
+  searchButton?.addEventListener("click", () => {
+    if (sidebar?.classList.contains("search-active")) {
+      clearSearch({ refocusButton: true });
+    } else {
+      openSearchPanel();
+    }
+  });
+
+  searchInput?.addEventListener("input", (event) => {
+    const value = event.target.value.trim().toLowerCase();
+    historyFilter = value;
+    renderHistoryList();
+  });
+
+  searchInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      clearSearch({ refocusButton: true });
+    }
+  });
+
+  searchClearButton?.addEventListener("click", () => {
+    clearSearch({ refocusButton: true });
   });
 
   const focusTextarea = () => {
@@ -510,10 +713,17 @@ const attachOverlayEvents = () => {
   bindHoverToggle(topZone, "top-hover");
   bindHoverToggle(header, "top-hover");
   bindHoverToggle(historyToggle, "top-hover");
+  bindHoverToggle(newNoteButton, "top-hover");
+  bindHoverToggle(searchButton, "top-hover");
+  bindHoverToggle(searchClearButton, "top-hover");
   bindHoverToggle(closeButton, "top-hover");
   bindHoverToggle(sidebarClose, "top-hover");
 
   bindFocusToggle(historyToggle, "top-hover");
+  bindFocusToggle(newNoteButton, "top-hover");
+  bindFocusToggle(searchButton, "top-hover");
+  bindFocusToggle(searchInput, "top-hover");
+  bindFocusToggle(searchClearButton, "top-hover");
   bindFocusToggle(closeButton, "top-hover");
   bindFocusToggle(sidebarClose, "top-hover");
 
@@ -543,6 +753,9 @@ const attachOverlayEvents = () => {
     if (!sidebar) {
       return;
     }
+    if (sidebar.classList.contains("search-active")) {
+      return;
+    }
     if (sidebarHideTimeout) {
       clearTimeout(sidebarHideTimeout);
     }
@@ -558,7 +771,9 @@ const attachOverlayEvents = () => {
     }
     const related = event.relatedTarget;
     if (!related || !sidebar.contains(related)) {
-      scheduleHideSidebarControls();
+      if (!sidebar.classList.contains("search-active")) {
+        scheduleHideSidebarControls();
+      }
     }
   };
 
@@ -568,6 +783,45 @@ const attachOverlayEvents = () => {
   sidebar?.addEventListener("mouseenter", showSidebarControls);
   sidebar?.addEventListener("mouseleave", handleSidebarPointerLeave);
 
+  const openSearchPanel = () => {
+    if (!sidebar) {
+      return;
+    }
+    sidebar.classList.add("search-active");
+    showSidebarControls();
+    requestAnimationFrame(() => {
+      searchInput?.focus({ preventScroll: true });
+    });
+  };
+
+  const clearSearch = ({ refocusButton = false, shouldRender = true } = {}) => {
+    historyFilter = "";
+    if (searchInput) {
+      searchInput.value = "";
+    }
+    sidebar?.classList.remove("search-active");
+    if (shouldRender) {
+      renderHistoryList();
+    }
+    if (refocusButton) {
+      searchButton?.focus({ preventScroll: true });
+    }
+    scheduleHideSidebarControls();
+  };
+
+  newNoteButton?.addEventListener("focus", () => showSidebarControls());
+  newNoteButton?.addEventListener("blur", () => scheduleHideSidebarControls());
+  searchButton?.addEventListener("focus", () => showSidebarControls());
+  searchButton?.addEventListener("blur", () => scheduleHideSidebarControls());
+  searchInput?.addEventListener("focus", () => showSidebarControls());
+  searchInput?.addEventListener("blur", () => {
+    if (!searchInput?.value) {
+      clearSearch();
+    }
+    scheduleHideSidebarControls();
+  });
+  searchClearButton?.addEventListener("focus", () => showSidebarControls());
+  searchClearButton?.addEventListener("blur", () => scheduleHideSidebarControls());
   sidebarClose?.addEventListener("focus", () => showSidebarControls());
   sidebarClose?.addEventListener("blur", () => scheduleHideSidebarControls());
   historyList?.addEventListener("focusin", () => scheduleHideSidebarControls());
@@ -598,6 +852,7 @@ const openOverlay = async () => {
 
   const overlay = document.createElement("div");
   overlay.id = OVERLAY_ID;
+  overlay.classList.remove("fade-out");
   overlay.classList.add("fade-in");
   overlay.innerHTML = `
     <div class="nori-surface">
@@ -605,8 +860,15 @@ const openOverlay = async () => {
         <div class="nori-sidebar__reveal-zone" aria-hidden="true"></div>
         <header class="nori-sidebar__header">
           <h2 class="nori-sidebar__title">History</h2>
-          <button type="button" class="nori-icon-btn nori-icon-btn--back" id="nori-sidebar-close" aria-label="Close history panel">${ICON_SVGS.back}</button>
+          <div class="nori-sidebar__actions">
+            <button type="button" class="nori-icon-btn" id="${SEARCH_BUTTON_ID}" aria-label="Search notes">${ICON_SVGS.search}</button>
+            <button type="button" class="nori-icon-btn nori-icon-btn--back" id="nori-sidebar-close" aria-label="Close history panel">${ICON_SVGS.back}</button>
+          </div>
         </header>
+        <div class="nori-sidebar__search" id="nori-search-panel">
+          <input id="${SEARCH_INPUT_ID}" type="search" autocomplete="off" placeholder="Search notes" aria-label="Search notes" />
+          <button type="button" class="nori-icon-btn nori-icon-btn--pill" id="nori-search-clear" aria-label="Clear search">✕</button>
+        </div>
         <div class="nori-sidebar__list" id="${HISTORY_LIST_ID}"></div>
       </aside>
       <div class="nori-main">
@@ -618,7 +880,11 @@ const openOverlay = async () => {
         </header>
         <textarea id="${TEXTAREA_ID}" placeholder="write your thoughts..."></textarea>
         <footer class="nori-main__footer">
-          <button type="button" id="${EXPORT_BUTTON_ID}" class="nori-export-btn" aria-label="Export history as Markdown">${ICON_SVGS.export}</button>
+          <div class="nori-footer-actions">
+            <button type="button" id="${MAIN_NEW_NOTE_BUTTON_ID}" class="nori-icon-btn" aria-label="Start a new note">${ICON_SVGS.plus}</button>
+            <button type="button" id="${SAVE_BUTTON_ID}" class="nori-icon-btn" aria-label="Save note">${ICON_SVGS.save}</button>
+            <button type="button" id="${EXPORT_BUTTON_ID}" class="nori-export-btn" aria-label="Export history as Markdown">${ICON_SVGS.export}</button>
+          </div>
         </footer>
         <div class="nori-control-zone nori-control-zone--bottom" aria-hidden="true"></div>
       </div>
@@ -637,6 +903,8 @@ const openOverlay = async () => {
     : [];
 
   historyState = loadedHistory;
+  historyFilter = "";
+  historyLoadSequence = 0;
   renderHistoryList();
 
   const textarea = overlay.querySelector(`#${TEXTAREA_ID}`);

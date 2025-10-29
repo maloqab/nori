@@ -1,12 +1,21 @@
 @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap");
 
+:root {
+  --nori-min-width: 364px;
+  --nori-min-height: 476px;
+}
+
 #nori-overlay {
   position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: min(540px, calc(100vw - 32px));
-  height: min(320px, calc(100vh - 32px));
+  width: var(--nori-min-width);
+  height: var(--nori-min-height);
+  min-width: var(--nori-min-width);
+  min-height: var(--nori-min-height);
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
   background: rgba(20, 20, 20, 0.5);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
@@ -14,8 +23,10 @@
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.12);
   display: flex;
-  overflow: hidden;
+  overflow: visible;
   z-index: 2147483646;
+  resize: both;
+  box-sizing: border-box;
 }
 
 #nori-overlay.fade-out {
@@ -27,6 +38,8 @@
   width: 100%;
   height: 100%;
   position: relative;
+  border-radius: 16px;
+  overflow: hidden;
 }
 
 .nori-sidebar {
@@ -49,10 +62,13 @@
   transform: translate3d(0, 0, 0);
   opacity: 1;
   pointer-events: auto;
+  width: 100%;
+  inset: 0;
+  border-right: none;
 }
 
 #nori-overlay.sidebar-open .nori-main {
-  margin-left: 220px;
+  display: none;
 }
 
 .nori-sidebar__header {
@@ -67,6 +83,59 @@
   pointer-events: none;
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
+.nori-sidebar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nori-sidebar__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  margin-top: -4px;
+  height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: opacity 0.18s ease, height 0.18s ease, margin-top 0.18s ease;
+}
+
+.nori-sidebar.search-active .nori-sidebar__search {
+  height: 40px;
+  opacity: 1;
+  margin-top: 8px;
+}
+
+#nori-search-input {
+  flex: 1;
+  background: rgba(18, 18, 18, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: rgba(235, 235, 235, 0.9);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+#nori-search-input::placeholder {
+  color: rgba(235, 235, 235, 0.4);
+}
+
+#nori-search-input:focus {
+  outline: none;
+  border-color: rgba(79, 167, 121, 0.6);
+  box-shadow: 0 0 0 2px rgba(79, 167, 121, 0.2);
+}
+
+.nori-icon-btn--pill {
+  min-width: 32px;
+  height: 32px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+
 
 .nori-sidebar__title {
   font-size: 12px;
@@ -121,14 +190,15 @@
 }
 
 .nori-history-item {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   background: rgba(28, 28, 28, 0.65);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  padding: 12px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  border-radius: 16px;
+  padding: 16px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
 
 .nori-history-item.active {
@@ -166,23 +236,29 @@
 }
 
 .nori-history-body {
-  background: transparent;
-  border: none;
+  background: rgba(24, 24, 24, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
   text-align: left;
-  padding: 0;
-  color: rgba(232, 232, 232, 0.9);
+  padding: 10px 14px;
+  color: rgba(232, 232, 232, 0.88);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.6;
   cursor: pointer;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
 }
 
 .nori-history-body:hover,
 .nori-history-body:focus-visible {
   color: rgba(255, 255, 255, 0.95);
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(28, 30, 30, 0.5);
 }
+
 
 .nori-main {
   flex: 1;
@@ -288,7 +364,12 @@
   font-family: "JetBrains Mono", monospace;
   font-size: 14px;
   line-height: 1.6;
+  transition: opacity 0.22s ease;
 }
+.nori-main.nori-editor-hidden #nori-textarea {
+  opacity: 0;
+}
+
 
 #nori-textarea::placeholder {
   color: rgba(232, 232, 232, 0.5);
@@ -318,6 +399,13 @@
   transition: opacity 0.2s ease, transform 0.2s ease;
   z-index: 3;
 }
+.nori-footer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
 
 .nori-export-btn {
   display: inline-flex;
@@ -385,31 +473,64 @@
 }
 
 .fade-in {
-  animation: fadeIn 0.25s ease forwards;
+  animation: fadeIn 0.38s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 .fade-out {
-  animation: fadeOut 0.25s ease forwards;
+  animation: fadeOut 0.26s ease forwards;
 }
 
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(0.97);
+    transform: translate(-50%, calc(-50% - 48px)) rotate(-1.2deg) scale(0.94);
+  }
+  55% {
+    transform: translate(-50%, calc(-50% + 6px)) rotate(0.4deg) scale(1.02);
   }
   to {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translate(-50%, -50%) rotate(0deg) scale(1);
   }
 }
 
 @keyframes fadeOut {
   from {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translate(-50%, -50%) rotate(0deg) scale(1);
   }
   to {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(0.97);
+    transform: translate(-50%, calc(-50% - 40px)) rotate(-1deg) scale(0.95);
+  }
+}
+
+.nori-main::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.97) translateY(-10px);
+  background: radial-gradient(120% 180% at 50% 0%, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0));
+}
+
+#nori-overlay .nori-main.nori-note-flash::after {
+  animation: noteHighlight 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes noteHighlight {
+  0% {
+    opacity: 0;
+    transform: scale(0.94) translateY(-18px);
+  }
+  45% {
+    opacity: 0.5;
+    transform: scale(1.02) translateY(-2px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1) translateY(0);
   }
 }
