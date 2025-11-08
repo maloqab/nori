@@ -53,6 +53,7 @@ let currentOverlay = null;
 let currentNoteId = null;
 let historyFilter = "";
 let historyLoadSequence = 0;
+let historyUpdateTimeout = null;
 
 const handleKeydown = (event) => {
   if (event.key === "Escape") {
@@ -211,7 +212,7 @@ const renderHistoryList = () => {
     bodyButton.type = "button";
     bodyButton.className = "nori-history-body";
     bodyButton.dataset.action = "load-note";
-    bodyButton.textContent = note.content.trim() || "(empty note)";
+    bodyButton.textContent = note.content.trim() || "write your thoughts...";
 
     item.append(meta, bodyButton);
     container.appendChild(item);
@@ -261,6 +262,29 @@ const persistCurrentValue = async (value) => {
 
 const persistHistory = async () => {
   await storageSet({ [HISTORY_KEY]: historyState });
+};
+
+const updateCurrentNoteInHistory = (rawValue) => {
+  if (!currentNoteId) {
+    return;
+  }
+
+  const noteIndex = historyState.findIndex((note) => note.id === currentNoteId);
+  if (noteIndex === -1) {
+    return;
+  }
+
+  const timestamp = new Date().toISOString();
+  const updatedNote = {
+    ...historyState[noteIndex],
+    content: rawValue,
+    updatedAt: timestamp,
+  };
+
+  historyState = [...historyState];
+  historyState[noteIndex] = updatedNote;
+  
+  renderHistoryList();
 };
 
 const handleNoteFinalization = async (rawValue) => {
@@ -529,27 +553,57 @@ const startNewNote = async () => {
     editorWrapper.removeAttribute("data-pending-reveal");
   }
 
-  const finalized = await handleNoteFinalization(textarea.value);
-  if (!finalized) {
+  // Check if there's current content first
+  const currentValue = textarea.value.trim();
+  if (currentValue) {
+    // If there's content, show a warning toast and prevent creating a new note
+    showToast("Don't waste trees, use latest note.");
     return;
   }
 
-  resetCurrentNoteContext();
-  textarea.value = "";
+  // If we already have an empty note in the editor or history, don't create another one
+  if (currentNoteId) {
+    showToast("Don't waste trees, use latest note.");
+    return;
+  }
+
+  // Also check if there's already an empty note in history (first note)
+  if (historyState.length > 0 && historyState[0].content.trim() === "") {
+    showToast("Don't waste trees, use latest note.");
+    return;
+  }
+
+  // Create a new empty note immediately
+  const timestamp = new Date().toISOString();
+  const newNote = {
+    id: generateNoteId(),
+    content: "",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    locked: false,
+  };
+
+  // Check history limit before adding
+  const candidateHistory = [newNote, ...historyState];
+  const check = enforceHistoryLimit(candidateHistory);
+
+  if (!check.success) {
+    showToast("All notes are locked. Unlock one to add a new note.");
+    return;
+  }
+
+  historyState = check.notes;
+  currentNoteId = newNote.id;
   await persistCurrentValue("");
+  await persistHistory();
+
+  // Note: We keep the sidebar open so user can see the new note card
+  // and click it to start editing
+
+  // Clear editor and clear current note context so it doesn't glow
+  textarea.value = "";
+  resetCurrentNoteContext();
   renderHistoryList();
-  requestAnimationFrame(() => {
-    if (!editorWrapper) {
-      return;
-    }
-    editorWrapper.classList.add("nori-note-flash");
-    const handleAnimationEnd = () => {
-      editorWrapper.classList.remove("nori-note-flash");
-    };
-    editorWrapper.addEventListener("animationend", handleAnimationEnd, { once: true });
-  });
-  textarea.focus({ preventScroll: true });
-  showToast("New note ready.");
 };
 
 const exportHistoryToMarkdown = () => {
@@ -622,6 +676,16 @@ const attachOverlayEvents = () => {
   textarea?.addEventListener("input", (event) => {
     const value = event.target.value;
     persistCurrentValue(value);
+    
+    // Update history in real-time with debouncing
+    if (historyUpdateTimeout) {
+      clearTimeout(historyUpdateTimeout);
+    }
+    historyUpdateTimeout = window.setTimeout(() => {
+      updateCurrentNoteInHistory(value);
+      void persistHistory();
+      historyUpdateTimeout = null;
+    }, 500);
   });
 
   closeButton?.addEventListener("click", () => {
@@ -828,13 +892,15 @@ const attachOverlayEvents = () => {
 };
 
 const injectStyles = () => {
-  if (document.getElementById("nori-style")) {
-    return;
+  // Always remove and re-add to avoid caching issues
+  const existing = document.getElementById("nori-style");
+  if (existing) {
+    existing.remove();
   }
 
   const style = document.createElement("link");
   style.rel = "stylesheet";
-  style.href = chrome.runtime.getURL("styles.css");
+  style.href = chrome.runtime.getURL("styles.css?v=" + Date.now());
   style.id = "nori-style";
   document.head.appendChild(style);
 };
@@ -862,6 +928,7 @@ const openOverlay = async () => {
           <h2 class="nori-sidebar__title">History</h2>
           <div class="nori-sidebar__actions">
             <button type="button" class="nori-icon-btn" id="${SEARCH_BUTTON_ID}" aria-label="Search notes">${ICON_SVGS.search}</button>
+            <button type="button" id="${NEW_NOTE_BUTTON_ID}" class="nori-icon-btn" aria-label="Start a new note">${ICON_SVGS.plus}</button>
             <button type="button" class="nori-icon-btn nori-icon-btn--back" id="nori-sidebar-close" aria-label="Close history panel">${ICON_SVGS.back}</button>
           </div>
         </header>
