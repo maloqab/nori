@@ -61,25 +61,69 @@
     <script>
       (() => {
         const messageListeners = [];
-        const storageKey = "nori_note";
         const storageNamespace = "nori_playground";
+        const storageChannels = {
+          sync: `${storageNamespace}_sync`,
+          local: `${storageNamespace}_local`,
+        };
 
-        const readStorage = () => {
+        const readStorage = (namespace) => {
           try {
-            const raw = localStorage.getItem(storageNamespace);
+            const raw = localStorage.getItem(namespace);
             return raw ? JSON.parse(raw) : {};
           } catch {
             return {};
           }
         };
 
-        const writeStorage = (data) => {
+        const writeStorage = (namespace, data) => {
           try {
-            localStorage.setItem(storageNamespace, JSON.stringify(data));
+            localStorage.setItem(namespace, JSON.stringify(data));
           } catch {
             // ignore quota errors in playground mode
           }
         };
+
+        const createArea = (namespace) => ({
+          get: (keys, callback) => {
+            const store = readStorage(namespace);
+            const result = {};
+
+            if (Array.isArray(keys)) {
+              keys.forEach((key) => {
+                result[key] = store[key];
+              });
+            } else if (typeof keys === "string") {
+              result[keys] = store[keys];
+            } else if (typeof keys === "object" && keys !== null) {
+              Object.keys(keys).forEach((key) => {
+                result[key] = store[key] ?? keys[key];
+              });
+            } else {
+              Object.assign(result, store);
+            }
+
+            callback(result);
+          },
+          set: (items, callback = () => {}) => {
+            const store = readStorage(namespace);
+            Object.assign(store, items);
+            writeStorage(namespace, store);
+            callback();
+          },
+          remove: (keys, callback = () => {}) => {
+            const store = readStorage(namespace);
+            if (Array.isArray(keys)) {
+              keys.forEach((key) => {
+                delete store[key];
+              });
+            } else if (typeof keys === "string") {
+              delete store[keys];
+            }
+            writeStorage(namespace, store);
+            callback();
+          },
+        });
 
         window.chrome = {
           runtime: {
@@ -92,46 +136,8 @@
             lastError: null,
           },
           storage: {
-            sync: {
-              get: (keys, callback) => {
-                const store = readStorage();
-                const result = {};
-
-                if (Array.isArray(keys)) {
-                  keys.forEach((key) => {
-                    result[key] = store[key];
-                  });
-                } else if (typeof keys === "string") {
-                  result[keys] = store[keys];
-                } else if (typeof keys === "object") {
-                  Object.keys(keys).forEach((key) => {
-                    result[key] = store[key] ?? keys[key];
-                  });
-                } else {
-                  Object.assign(result, store);
-                }
-
-                callback(result);
-              },
-              set: (items, callback = () => {}) => {
-                const store = readStorage();
-                Object.assign(store, items);
-                writeStorage(store);
-                callback();
-              },
-              remove: (keys, callback = () => {}) => {
-                const store = readStorage();
-                if (Array.isArray(keys)) {
-                  keys.forEach((key) => {
-                    delete store[key];
-                  });
-                } else if (typeof keys === "string") {
-                  delete store[keys];
-                }
-                writeStorage(store);
-                callback();
-              },
-            },
+            sync: createArea(storageChannels.sync),
+            local: createArea(storageChannels.local),
           },
         };
 

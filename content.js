@@ -30,23 +30,78 @@ const ICON_SVGS = {
   back: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.6 6v12" stroke-width="1.5"/><path d="M18 12h-6.1" stroke-width="1.4"/><path d="M15 8.5 11.9 12l3.1 3.5" stroke-width="1.7"/></svg>`,
 };
 
-const storageGet = (keys) =>
-  new Promise((resolve) => {
-    chrome.storage.sync.get(keys, (result) => {
-      if (chrome.runtime.lastError) {
-        resolve({});
-        return;
-      }
-      resolve(result);
-    });
-  });
+const HISTORY_PREVIEW_DEBOUNCE_MS = 400;
+const SYNC_WARNING_INTERVAL_MS = 2400;
 
-const storageSet = (items) =>
-  new Promise((resolve) => {
-    chrome.storage.sync.set(items, () => {
-      resolve(!chrome.runtime.lastError);
-    });
-  });
+const createStorageArea = (areaName) => {
+  const area = chrome?.storage?.[areaName];
+  const unavailableResult = {
+    ok: false,
+    error: `${areaName} storage unavailable`,
+  };
+
+  return {
+    get: (keys) =>
+      new Promise((resolve) => {
+        if (!area) {
+          resolve({});
+          return;
+        }
+        area.get(keys, (result) => {
+          if (chrome.runtime.lastError) {
+            console.warn(
+              `[nori] ${areaName} storage get failed:`,
+              chrome.runtime.lastError.message
+            );
+            resolve({});
+            return;
+          }
+          resolve(result || {});
+        });
+      }),
+    set: (items) =>
+      new Promise((resolve) => {
+        if (!area) {
+          resolve(unavailableResult);
+          return;
+        }
+        area.set(items, () => {
+          if (chrome.runtime.lastError) {
+            resolve({
+              ok: false,
+              error: chrome.runtime.lastError.message || "Unknown storage error",
+            });
+            return;
+          }
+          resolve({ ok: true });
+        });
+      }),
+    remove: (keys) =>
+      new Promise((resolve) => {
+        if (!area) {
+          resolve(unavailableResult);
+          return;
+        }
+        area.remove(keys, () => {
+          if (chrome.runtime.lastError) {
+            resolve({
+              ok: false,
+              error: chrome.runtime.lastError.message || "Unknown storage error",
+            });
+            return;
+          }
+          resolve({ ok: true });
+        });
+      }),
+  };
+};
+
+const storage = {
+  sync: createStorageArea("sync"),
+  local: createStorageArea("local"),
+};
+
+let lastSyncWarningAt = 0;
 
 let historyState = [];
 let currentOverlay = null;
@@ -54,6 +109,29 @@ let currentNoteId = null;
 let historyFilter = "";
 let historyLoadSequence = 0;
 let historyUpdateTimeout = null;
+
+const notifySyncIssue = (errorMessage) => {
+  const now = Date.now();
+  console.warn("[nori] Chrome Sync save failed:", errorMessage);
+  if (now - lastSyncWarningAt < SYNC_WARNING_INTERVAL_MS) {
+    return;
+  }
+  lastSyncWarningAt = now;
+  showToast("Saved locally; Chrome Sync quota hit.");
+};
+
+const handleHistoryPersistResult = (result) => {
+  if (!result?.ok) {
+    notifySyncIssue(result?.error);
+  }
+};
+
+const clearPendingHistoryUpdate = () => {
+  if (historyUpdateTimeout) {
+    window.clearTimeout(historyUpdateTimeout);
+    historyUpdateTimeout = null;
+  }
+};
 
 const handleKeydown = (event) => {
   if (event.key === "Escape") {
@@ -257,11 +335,19 @@ const resetCurrentNoteContext = () => {
 };
 
 const persistCurrentValue = async (value) => {
-  await storageSet({ [STORAGE_KEY]: value });
+  const result = await storage.local.set({ [STORAGE_KEY]: value });
+  if (!result.ok) {
+    console.warn("[nori] Failed to persist working note:", result.error);
+  }
 };
 
 const persistHistory = async () => {
-  await storageSet({ [HISTORY_KEY]: historyState });
+  const payload = { [HISTORY_KEY]: historyState };
+  const localResult = await storage.local.set(payload);
+  if (!localResult.ok) {
+    console.warn("[nori] Failed to persist history locally:", localResult.error);
+  }
+  return storage.sync.set(payload);
 };
 
 const updateCurrentNoteInHistory = (rawValue) => {
@@ -283,7 +369,7 @@ const updateCurrentNoteInHistory = (rawValue) => {
 
   historyState = [...historyState];
   historyState[noteIndex] = updatedNote;
-  
+
   renderHistoryList();
 };
 
@@ -299,7 +385,8 @@ const handleNoteFinalization = async (rawValue) => {
         const updatedHistory = [...historyState];
         updatedHistory.splice(existingIndex, 1);
         historyState = updatedHistory;
-        await persistHistory();
+        const historyResult = await persistHistory();
+        handleHistoryPersistResult(historyResult);
         renderHistoryList();
       }
     }
@@ -329,7 +416,8 @@ const handleNoteFinalization = async (rawValue) => {
 
       historyState = reordered;
       await persistCurrentValue(rawValue);
-      await persistHistory();
+      const historyResult = await persistHistory();
+      handleHistoryPersistResult(historyResult);
       renderHistoryList();
       return true;
     }
@@ -356,7 +444,8 @@ const handleNoteFinalization = async (rawValue) => {
   historyState = check.notes;
   currentNoteId = newNote.id;
   await persistCurrentValue(rawValue);
-  await persistHistory();
+  const historyResult = await persistHistory();
+  handleHistoryPersistResult(historyResult);
   renderHistoryList();
   showToast("Saved to history.");
   return true;
@@ -367,6 +456,8 @@ const closeOverlay = async () => {
   if (!overlay || overlay.dataset.closing === "true") {
     return;
   }
+
+  clearPendingHistoryUpdate();
 
   const textarea = overlay.querySelector(`#${TEXTAREA_ID}`);
   const noteValue = textarea ? textarea.value : "";
@@ -418,6 +509,7 @@ const handleHistoryAction = async (event) => {
   const textarea = currentOverlay?.querySelector(`#${TEXTAREA_ID}`);
 
   if (action === "load-note") {
+    clearPendingHistoryUpdate();
     const note = historyState[noteIndex];
     if (textarea) {
       const editorWrapper = currentOverlay?.querySelector(".nori-main");
@@ -490,7 +582,8 @@ const handleHistoryAction = async (event) => {
     const newHistory = [...historyState];
     newHistory.splice(noteIndex, 1, updated);
     historyState = newHistory;
-    await persistHistory();
+    const historyResult = await persistHistory();
+    handleHistoryPersistResult(historyResult);
     renderHistoryList();
     showToast(updated.locked ? "Note locked." : "Note unlocked.");
     return;
@@ -504,7 +597,8 @@ const handleHistoryAction = async (event) => {
     if (currentNoteId === note.id) {
       resetCurrentNoteContext();
     }
-    await persistHistory();
+    const historyResult = await persistHistory();
+    handleHistoryPersistResult(historyResult);
     renderHistoryList();
     showToast("Note deleted.");
   }
@@ -519,6 +613,8 @@ const saveCurrentNote = async () => {
   if (!textarea) {
     return;
   }
+
+  clearPendingHistoryUpdate();
 
   const editorWrapper = textarea.closest(".nori-main");
   editorWrapper?.classList.remove("nori-editor-hidden");
@@ -539,12 +635,21 @@ const startNewNote = async () => {
     return;
   }
 
-  historyLoadSequence += 1;
+  clearPendingHistoryUpdate();
 
   const textarea = currentOverlay.querySelector(`#${TEXTAREA_ID}`);
   if (!textarea) {
     return;
   }
+
+  const trimmedValue = textarea.value.trim();
+  if (!trimmedValue) {
+    textarea.focus({ preventScroll: true });
+    showToast("You're already on a fresh note.");
+    return;
+  }
+
+  historyLoadSequence += 1;
 
   const editorWrapper = textarea.closest(".nori-main");
   if (editorWrapper) {
@@ -553,57 +658,18 @@ const startNewNote = async () => {
     editorWrapper.removeAttribute("data-pending-reveal");
   }
 
-  // Check if there's current content first
-  const currentValue = textarea.value.trim();
-  if (currentValue) {
-    // If there's content, show a warning toast and prevent creating a new note
-    showToast("Don't waste trees, use latest note.");
+  const saved = await handleNoteFinalization(textarea.value);
+  if (!saved) {
+    textarea.focus({ preventScroll: true });
     return;
   }
 
-  // If we already have an empty note in the editor or history, don't create another one
-  if (currentNoteId) {
-    showToast("Don't waste trees, use latest note.");
-    return;
-  }
-
-  // Also check if there's already an empty note in history (first note)
-  if (historyState.length > 0 && historyState[0].content.trim() === "") {
-    showToast("Don't waste trees, use latest note.");
-    return;
-  }
-
-  // Create a new empty note immediately
-  const timestamp = new Date().toISOString();
-  const newNote = {
-    id: generateNoteId(),
-    content: "",
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    locked: false,
-  };
-
-  // Check history limit before adding
-  const candidateHistory = [newNote, ...historyState];
-  const check = enforceHistoryLimit(candidateHistory);
-
-  if (!check.success) {
-    showToast("All notes are locked. Unlock one to add a new note.");
-    return;
-  }
-
-  historyState = check.notes;
-  currentNoteId = newNote.id;
-  await persistCurrentValue("");
-  await persistHistory();
-
-  // Note: We keep the sidebar open so user can see the new note card
-  // and click it to start editing
-
-  // Clear editor and clear current note context so it doesn't glow
-  textarea.value = "";
   resetCurrentNoteContext();
+  textarea.value = "";
+  await persistCurrentValue("");
+  textarea.focus({ preventScroll: true });
   renderHistoryList();
+  showToast("Ready for a new note.");
 };
 
 const exportHistoryToMarkdown = () => {
@@ -675,17 +741,16 @@ const attachOverlayEvents = () => {
 
   textarea?.addEventListener("input", (event) => {
     const value = event.target.value;
-    persistCurrentValue(value);
-    
-    // Update history in real-time with debouncing
+    void persistCurrentValue(value);
+
+    // Update history UI in real-time without hammering Chrome Sync
     if (historyUpdateTimeout) {
       clearTimeout(historyUpdateTimeout);
     }
     historyUpdateTimeout = window.setTimeout(() => {
       updateCurrentNoteInHistory(value);
-      void persistHistory();
       historyUpdateTimeout = null;
-    }, 500);
+    }, HISTORY_PREVIEW_DEBOUNCE_MS);
   });
 
   closeButton?.addEventListener("click", () => {
@@ -963,13 +1028,38 @@ const openOverlay = async () => {
   currentOverlay = overlay;
   resetCurrentNoteContext();
 
-  const stored = await storageGet([STORAGE_KEY, HISTORY_KEY]);
-  const initialValue = stored[STORAGE_KEY] || "";
-  const loadedHistory = Array.isArray(stored[HISTORY_KEY])
-    ? stored[HISTORY_KEY]
+  const [syncStored, localStored] = await Promise.all([
+    storage.sync.get([STORAGE_KEY, HISTORY_KEY]),
+    storage.local.get([STORAGE_KEY, HISTORY_KEY]),
+  ]);
+
+  const hasLocalValue = Object.prototype.hasOwnProperty.call(
+    localStored,
+    STORAGE_KEY
+  );
+  const hasSyncValue = Object.prototype.hasOwnProperty.call(
+    syncStored,
+    STORAGE_KEY
+  );
+
+  const initialValue = hasLocalValue
+    ? localStored[STORAGE_KEY] || ""
+    : hasSyncValue
+    ? syncStored[STORAGE_KEY] || ""
+    : "";
+
+  await persistCurrentValue(initialValue);
+
+  const historyFromSync = Array.isArray(syncStored[HISTORY_KEY])
+    ? syncStored[HISTORY_KEY]
+    : null;
+  const historyFromLocal = Array.isArray(localStored[HISTORY_KEY])
+    ? localStored[HISTORY_KEY]
     : [];
 
-  historyState = loadedHistory;
+  historyState = [...(historyFromSync ?? historyFromLocal ?? [])];
+  void storage.local.set({ [HISTORY_KEY]: historyState });
+
   historyFilter = "";
   historyLoadSequence = 0;
   renderHistoryList();
