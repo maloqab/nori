@@ -16,6 +16,15 @@ const SEARCH_BUTTON_ID = "nori-search";
 const SEARCH_INPUT_ID = "nori-search-input";
 const TOAST_ID = "nori-toast";
 const SIDEBAR_OPEN_CLASS = "sidebar-open";
+const EDITOR_LINKS_ID = "nori-editor-links";
+
+const HISTORY_LINK_LIMIT = 4;
+const EDITOR_LINK_LIMIT = 6;
+const LINK_LABEL_MAX_LENGTH = 42;
+const URL_PATTERN =
+  /\b((?:https?:\/\/|www\.)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s]*)?)/gi;
+const TRAILING_PUNCTUATION_PATTERN = /[),.;!?"'\]]+$/;
+const PROTOCOL_PATTERN = /^https?:\/\//i;
 
 const ICON_SVGS = {
   history: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>`,
@@ -170,6 +179,77 @@ const formatTimestamp = (iso, forExport = false) => {
   });
 };
 
+const normalizeUrl = (url) => {
+  if (!url || typeof url !== "string") {
+    return "";
+  }
+  const trimmed = url.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return PROTOCOL_PATTERN.test(trimmed) ? trimmed : `https://${trimmed}`;
+};
+
+const extractUrls = (text = "") => {
+  if (!text || typeof text !== "string") {
+    return [];
+  }
+
+  const matches = text.match(URL_PATTERN);
+  if (!matches) {
+    return [];
+  }
+
+  const seen = new Set();
+  return matches
+    .map((raw) =>
+      normalizeUrl(raw.replace(TRAILING_PUNCTUATION_PATTERN, ""))
+    )
+    .filter((url) => {
+      if (!url || seen.has(url)) {
+        return false;
+      }
+      seen.add(url);
+      return true;
+    });
+};
+
+const formatLinkLabel = (url) => {
+  const normalized = normalizeUrl(url);
+  const truncate = (value) =>
+    value.length > LINK_LABEL_MAX_LENGTH
+      ? `${value.slice(0, LINK_LABEL_MAX_LENGTH - 1)}…`
+      : value;
+
+  try {
+    const parsed = new URL(normalized);
+    const host = parsed.hostname.replace(/^www\./i, "");
+    const path = parsed.pathname && parsed.pathname !== "/" ? parsed.pathname : "";
+    return truncate(`${host}${path}`);
+  } catch {
+    const fallback = normalized.replace(PROTOCOL_PATTERN, "");
+    return truncate(fallback);
+  }
+};
+
+const createLinkChip = (url) => {
+  const normalized = normalizeUrl(url);
+  if (!normalized) {
+    return null;
+  }
+  const anchor = document.createElement("a");
+  anchor.href = normalized;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  anchor.className = "nori-link-chip";
+  anchor.textContent = formatLinkLabel(normalized);
+  anchor.title = normalized;
+  anchor.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+  return anchor;
+};
+
 const showToast = (message) => {
   if (!currentOverlay) {
     return;
@@ -291,8 +371,85 @@ const renderHistoryList = () => {
     bodyButton.textContent = note.content.trim() || "write your thoughts...";
 
     item.append(meta, bodyButton);
+
+    const urls = extractUrls(note.content || "");
+    if (urls.length) {
+      const linkList = document.createElement("div");
+      linkList.className = "nori-history-links";
+      urls.slice(0, HISTORY_LINK_LIMIT).forEach((url) => {
+        const chip = createLinkChip(url);
+        if (chip) {
+          linkList.appendChild(chip);
+        }
+      });
+      item.appendChild(linkList);
+    }
     container.appendChild(item);
   });
+};
+
+const renderEditorLinks = (value = "") => {
+  if (!currentOverlay) {
+    return;
+  }
+  const container = currentOverlay.querySelector(`#${EDITOR_LINKS_ID}`);
+  if (!container) {
+    return;
+  }
+  container.textContent = "";
+  const urls = extractUrls(value).slice(0, EDITOR_LINK_LIMIT);
+  if (!urls.length) {
+    container.classList.add("nori-editor-links--empty");
+    return;
+  }
+  container.classList.remove("nori-editor-links--empty");
+  urls.forEach((url) => {
+    const chip = createLinkChip(url);
+    if (chip) {
+      container.appendChild(chip);
+    }
+  });
+};
+
+const ensureDraftHistoryEntry = (value) => {
+  if (currentNoteId) {
+    return;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return;
+  }
+  const timestamp = new Date().toISOString();
+  const draftNote = {
+    id: generateNoteId(),
+    content: value,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    locked: false,
+    isDraft: true,
+  };
+  historyState = [draftNote, ...historyState];
+  currentNoteId = draftNote.id;
+  renderHistoryList();
+};
+
+const removeDraftHistoryEntry = () => {
+  if (!currentNoteId) {
+    return;
+  }
+  const noteIndex = historyState.findIndex((note) => note.id === currentNoteId);
+  if (noteIndex === -1) {
+    return;
+  }
+  const target = historyState[noteIndex];
+  if (!target?.isDraft) {
+    return;
+  }
+  const updatedHistory = [...historyState];
+  updatedHistory.splice(noteIndex, 1);
+  historyState = updatedHistory;
+  resetCurrentNoteContext();
+  renderHistoryList();
 };
 
 const setSidebarState = (open) => {
@@ -406,6 +563,7 @@ const handleNoteFinalization = async (rawValue) => {
         ...existing,
         content: rawValue,
         updatedAt: timestamp,
+        isDraft: false,
       };
 
       const reordered = [...historyState];
@@ -429,6 +587,7 @@ const handleNoteFinalization = async (rawValue) => {
     createdAt: timestamp,
     updatedAt: timestamp,
     locked: false,
+    isDraft: false,
   };
 
   const candidateHistory = [newNote, ...historyState];
@@ -508,69 +667,87 @@ const handleHistoryAction = async (event) => {
 
   if (action === "load-note") {
     clearPendingHistoryUpdate();
-    const note = historyState[noteIndex];
-    if (textarea) {
-      const editorWrapper = currentOverlay?.querySelector(".nori-main");
-      editorWrapper?.classList.remove("nori-note-flash");
+    if (!textarea) {
+      return;
+    }
 
-      const sequence = ++historyLoadSequence;
+    const shouldFinalizeCurrent = noteId !== currentNoteId;
+    if (shouldFinalizeCurrent) {
+      const saved = await handleNoteFinalization(textarea.value);
+      if (!saved) {
+        textarea.focus({ preventScroll: true });
+        return;
+      }
+      renderHistoryList();
+    }
 
-      const applyLoadedNote = async () => {
-        if (sequence !== historyLoadSequence) {
+    const refreshedIndex = historyState.findIndex((note) => note.id === noteId);
+    if (refreshedIndex === -1) {
+      return;
+    }
+    const targetNote = historyState[refreshedIndex];
+
+    const editorWrapper = currentOverlay?.querySelector(".nori-main");
+    editorWrapper?.classList.remove("nori-note-flash");
+
+    const sequence = ++historyLoadSequence;
+
+    const applyLoadedNote = async () => {
+      if (sequence !== historyLoadSequence) {
+        return;
+      }
+      textarea.value = targetNote.content;
+      textarea.focus({ preventScroll: true });
+      currentNoteId = targetNote.id;
+      await persistCurrentValue(targetNote.content);
+      renderEditorLinks(targetNote.content);
+      renderHistoryList();
+      showToast("Loaded note into editor.");
+      if (editorWrapper) {
+        editorWrapper.classList.remove("nori-editor-hidden");
+        editorWrapper.removeAttribute("data-pending-reveal");
+      }
+    };
+
+    const sidebarElement = currentOverlay?.querySelector(`#${SIDEBAR_ID}`);
+    const wasOpen = currentOverlay?.classList.contains(SIDEBAR_OPEN_CLASS);
+
+    const waitForSidebarClose = () =>
+      new Promise((resolve) => {
+        if (!wasOpen || !sidebarElement) {
+          resolve();
           return;
         }
-        textarea.value = note.content;
-        textarea.focus({ preventScroll: true });
-        currentNoteId = note.id;
-        await persistCurrentValue(note.content);
-        renderHistoryList();
-        showToast("Loaded note into editor.");
-        if (editorWrapper) {
-          editorWrapper.classList.remove("nori-editor-hidden");
-          editorWrapper.removeAttribute("data-pending-reveal");
-        }
-      };
 
-      const sidebarElement = currentOverlay?.querySelector(`#${SIDEBAR_ID}`);
-      const wasOpen = currentOverlay?.classList.contains(SIDEBAR_OPEN_CLASS);
+        const cleanup = () => {
+          sidebarElement.removeEventListener("transitionend", handler);
+          resolve();
+        };
 
-      const waitForSidebarClose = () =>
-        new Promise((resolve) => {
-          if (!wasOpen || !sidebarElement) {
-            resolve();
-            return;
+        const handler = (event) => {
+          if (event.target === sidebarElement && event.propertyName === "transform") {
+            cleanup();
           }
+        };
 
-          const cleanup = () => {
-            sidebarElement.removeEventListener("transitionend", handler);
-            resolve();
-          };
+        sidebarElement.addEventListener("transitionend", handler);
+        window.setTimeout(cleanup, ANIMATION_DURATION_MS);
+      });
 
-          const handler = (event) => {
-            if (event.target === sidebarElement && event.propertyName === "transform") {
-              cleanup();
-            }
-          };
-
-          sidebarElement.addEventListener("transitionend", handler);
-          window.setTimeout(cleanup, ANIMATION_DURATION_MS);
-        });
-
-      if (editorWrapper) {
-        if (wasOpen) {
-          editorWrapper.dataset.pendingReveal = "true";
-          editorWrapper.classList.add("nori-editor-hidden");
-        } else {
-          editorWrapper.classList.remove("nori-editor-hidden");
-          editorWrapper.removeAttribute("data-pending-reveal");
-        }
+    if (editorWrapper) {
+      if (wasOpen) {
+        editorWrapper.dataset.pendingReveal = "true";
+        editorWrapper.classList.add("nori-editor-hidden");
+      } else {
+        editorWrapper.classList.remove("nori-editor-hidden");
+        editorWrapper.removeAttribute("data-pending-reveal");
       }
-
-      setSidebarState(false);
-
-      await waitForSidebarClose();
-      await applyLoadedNote();
     }
+
+    setSidebarState(false);
+
+    await waitForSidebarClose();
+    await applyLoadedNote();
     return;
   }
 
@@ -616,6 +793,7 @@ const startNewNote = async () => {
 
   const trimmedValue = textarea.value.trim();
   if (!trimmedValue) {
+    renderEditorLinks(textarea.value);
     textarea.focus({ preventScroll: true });
     showToast("You're already on a fresh note.");
     return;
@@ -632,6 +810,7 @@ const startNewNote = async () => {
 
   const saved = await handleNoteFinalization(textarea.value);
   if (!saved) {
+    renderEditorLinks(textarea.value);
     textarea.focus({ preventScroll: true });
     return;
   }
@@ -639,6 +818,7 @@ const startNewNote = async () => {
   resetCurrentNoteContext();
   textarea.value = "";
   await persistCurrentValue("");
+  renderEditorLinks("");
   textarea.focus({ preventScroll: true });
   renderHistoryList();
   showToast("Ready for a new note.");
@@ -712,7 +892,12 @@ const attachOverlayEvents = () => {
 
   textarea?.addEventListener("input", (event) => {
     const value = event.target.value;
+    ensureDraftHistoryEntry(value);
+    if (!value.trim()) {
+      removeDraftHistoryEntry();
+    }
     void persistCurrentValue(value);
+    renderEditorLinks(value);
 
     // Update history UI in real-time without hammering Chrome Sync
     if (historyUpdateTimeout) {
@@ -978,6 +1163,7 @@ const openOverlay = async () => {
           <button type="button" class="nori-icon-btn" id="${CLOSE_BUTTON_ID}" aria-label="Close Nori overlay">✕</button>
         </header>
         <textarea id="${TEXTAREA_ID}" placeholder="write your thoughts..."></textarea>
+        <div class="nori-editor-links nori-editor-links--empty" id="${EDITOR_LINKS_ID}" aria-label="Links in current note"></div>
         <footer class="nori-main__footer">
           <div class="nori-footer-actions">
             <button type="button" id="${MAIN_NEW_NOTE_BUTTON_ID}" class="nori-icon-btn" aria-label="Start a new note">${ICON_SVGS.plus}</button>
@@ -1033,6 +1219,7 @@ const openOverlay = async () => {
   const textarea = overlay.querySelector(`#${TEXTAREA_ID}`);
   if (textarea) {
     textarea.value = initialValue;
+    renderEditorLinks(initialValue);
     textarea.focus({ preventScroll: true });
   }
 

@@ -318,6 +318,37 @@
   box-shadow: none;
 }
 
+.nori-history-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.nori-link-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  color: rgba(235, 235, 235, 0.85);
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.nori-link-chip:hover,
+.nori-link-chip:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
 .nori-main {
   flex: 1;
   display: flex;
@@ -443,6 +474,19 @@
 #nori-textarea::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.12);
   border-radius: 4px;
+}
+
+.nori-editor-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 28px 12px;
+  margin-top: -8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.nori-editor-links--empty {
+  display: none;
 }
 
 .nori-main__footer {
