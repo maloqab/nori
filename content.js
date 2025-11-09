@@ -10,7 +10,6 @@ const HISTORY_TOGGLE_ID = "nori-history-toggle";
 const SIDEBAR_ID = "nori-sidebar";
 const HISTORY_LIST_ID = "nori-history-list";
 const EXPORT_BUTTON_ID = "nori-export";
-const SAVE_BUTTON_ID = "nori-save";
 const NEW_NOTE_BUTTON_ID = "nori-new-note";
 const MAIN_NEW_NOTE_BUTTON_ID = "nori-main-new-note";
 const SEARCH_BUTTON_ID = "nori-search";
@@ -24,7 +23,6 @@ const ICON_SVGS = {
   unlock: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M9 11V8a3 3 0 0 1 5.5-1.5"/></svg>`,
   delete: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7h14"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 7l1-3h6l1 3"/><path d="M6 7l.5 13h11L18 7"/></svg>`,
   export: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v11"/><path d="M8 9l4-4 4 4"/><path d="M5 16v1.5A1.5 1.5 0 0 0 6.5 19h11a1.5 1.5 0 0 0 1.5-1.5V16"/></svg>`,
-  save: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4 10-10"/></svg>`,
   plus: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
   search: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="5"/><path d="M16 16l4 4"/></svg>`,
   back: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.6 6v12" stroke-width="1.5"/><path d="M18 12h-6.1" stroke-width="1.4"/><path d="M15 8.5 11.9 12l3.1 3.5" stroke-width="1.7"/></svg>`,
@@ -604,32 +602,6 @@ const handleHistoryAction = async (event) => {
   }
 };
 
-const saveCurrentNote = async () => {
-  if (!currentOverlay) {
-    return;
-  }
-
-  const textarea = currentOverlay.querySelector(`#${TEXTAREA_ID}`);
-  if (!textarea) {
-    return;
-  }
-
-  clearPendingHistoryUpdate();
-
-  const editorWrapper = textarea.closest(".nori-main");
-  editorWrapper?.classList.remove("nori-editor-hidden");
-  editorWrapper?.removeAttribute("data-pending-reveal");
-
-  const saved = await handleNoteFinalization(textarea.value);
-  if (!saved) {
-    return;
-  }
-
-  renderHistoryList();
-  textarea.focus({ preventScroll: true });
-  showToast("Note saved.");
-};
-
 const startNewNote = async () => {
   if (!currentOverlay) {
     return;
@@ -722,7 +694,6 @@ const attachOverlayEvents = () => {
   const closeButton = currentOverlay.querySelector(`#${CLOSE_BUTTON_ID}`);
   const historyToggle = currentOverlay.querySelector(`#${HISTORY_TOGGLE_ID}`);
   const historyList = currentOverlay.querySelector(`#${HISTORY_LIST_ID}`);
-  const saveButton = currentOverlay.querySelector(`#${SAVE_BUTTON_ID}`);
   const exportButton = currentOverlay.querySelector(`#${EXPORT_BUTTON_ID}`);
   const mainNewNoteButton = currentOverlay.querySelector(`#${MAIN_NEW_NOTE_BUTTON_ID}`);
   const newNoteButton = currentOverlay.querySelector(`#${NEW_NOTE_BUTTON_ID}`);
@@ -768,10 +739,6 @@ const attachOverlayEvents = () => {
 
   historyList?.addEventListener("click", (event) => {
     void handleHistoryAction(event);
-  });
-
-  saveButton?.addEventListener("click", () => {
-    void saveCurrentNote();
   });
 
   exportButton?.addEventListener("click", () => {
@@ -1014,7 +981,6 @@ const openOverlay = async () => {
         <footer class="nori-main__footer">
           <div class="nori-footer-actions">
             <button type="button" id="${MAIN_NEW_NOTE_BUTTON_ID}" class="nori-icon-btn" aria-label="Start a new note">${ICON_SVGS.plus}</button>
-            <button type="button" id="${SAVE_BUTTON_ID}" class="nori-icon-btn" aria-label="Save note">${ICON_SVGS.save}</button>
             <button type="button" id="${EXPORT_BUTTON_ID}" class="nori-export-btn" aria-label="Export history as Markdown">${ICON_SVGS.export}</button>
           </div>
         </footer>
