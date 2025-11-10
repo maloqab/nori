@@ -218,6 +218,7 @@
   isolation: isolate;
   transition: transform 0.24s ease, border-color 0.24s ease,
     box-shadow 0.24s ease, background 0.24s ease;
+  cursor: pointer;
 }
 
 .nori-history-item::before,
@@ -316,6 +317,11 @@
 .nori-history-item.active .nori-history-body,
 .nori-history-item.active:hover .nori-history-body {
   box-shadow: none;
+}
+
+.nori-history-item:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.2);
+  outline-offset: 2px;
 }
 
 .nori-history-links {

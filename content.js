@@ -328,6 +328,10 @@ const renderHistoryList = () => {
     const item = document.createElement("article");
     item.className = "nori-history-item";
     item.dataset.noteId = note.id;
+    item.dataset.action = "load-note";
+    item.tabIndex = 0;
+    item.setAttribute("role", "button");
+
     if (note.id === currentNoteId) {
       item.classList.add("active");
     }
@@ -364,13 +368,11 @@ const renderHistoryList = () => {
     actions.append(lockButton, deleteButton);
     meta.append(timestamp, actions);
 
-    const bodyButton = document.createElement("button");
-    bodyButton.type = "button";
-    bodyButton.className = "nori-history-body";
-    bodyButton.dataset.action = "load-note";
-    bodyButton.textContent = note.content.trim() || "write your thoughts...";
+    const body = document.createElement("div");
+    body.className = "nori-history-body";
+    body.textContent = note.content.trim() || "write your thoughts...";
 
-    item.append(meta, bodyButton);
+    item.append(meta, body);
 
     const urls = extractUrls(note.content || "");
     if (urls.length) {
@@ -924,6 +926,13 @@ const attachOverlayEvents = () => {
 
   historyList?.addEventListener("click", (event) => {
     void handleHistoryAction(event);
+  });
+
+  historyList?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      void handleHistoryAction(event);
+    }
   });
 
   exportButton?.addEventListener("click", () => {
