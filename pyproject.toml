@@ -1,0 +1,22 @@
+[project]
+name = "nori"
+version = "0.1.0"
+description = "Nori for the terminal: a quiet notepad that saves as you type."
+requires-python = ">=3.11"
+dependencies = ["textual>=1.0"]
+
+[project.scripts]
+nori = "nori_term.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nori_term"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
