@@ -1,6 +1,6 @@
 """Notes on disk: one Markdown file per note, plus a hidden state file.
 
-Notes live in a plain folder (default ~/Onyx/Nori) so Obsidian sees them too.
+Notes live in a plain folder (default ~/notes, or $NORI_DIR) so Obsidian sees them too.
 Nori-only state (locked notes, last open note) lives in `.nori.json` in that
 folder; Obsidian ignores dotfiles, so it never shows up as a note.
 """
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-DEFAULT_DIR = Path.home() / "Onyx" / "Nori"
+DEFAULT_DIR = Path.home() / "notes"
 STATE_FILE = ".nori.json"
 TITLE_MAX = 40
 

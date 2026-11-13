@@ -21,10 +21,10 @@ Locked notes stay pinned at the top. Deleted notes go to the macOS Trash, so the
 
 ## Where notes live
 
-Each note is a plain Markdown file in `~/Onyx/Nori/`, so it works with Obsidian or any editor. Set `NORI_DIR` to use a different folder:
+Each note is a plain Markdown file in `~/notes/`, so it works with Obsidian or any editor. Set `NORI_DIR` to use a different folder, such as one inside an Obsidian vault:
 
 ```sh
-export NORI_DIR=~/notes
+export NORI_DIR=~/Obsidian/Nori
 ```
 
 ## Install
