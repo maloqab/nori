@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+
+from rich.cells import cell_len
 from rich.text import Text
 from textual import events, on
 from textual.app import App, ComposeResult
@@ -18,9 +21,14 @@ SAVE_DELAY = 0.4  # seconds of quiet typing before writing to disk
 LOOK_EVERY = 3.0  # seconds between checks of the terminal's wa look (it follows day/night)
 
 
+BOLD = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
+CODE_SPAN = re.compile(r"`[^`]*`")
+
+
 class Page(TextArea):
-    """The editor. A paste lands as-is, then the app may organize it. Headings show without their '#'
-    marks (styled by level instead), except on the line the cursor is on, the way Obsidian does."""
+    """The editor. A paste lands as-is, then the app may organize it. Markdown marks are hidden the way
+    Obsidian hides them: headings show without their '#' (styled by level), **bold** without its stars,
+    except on the line the cursor is on. Only the page changes; the text and the file keep every mark."""
 
     def _heading(self, row: int) -> tuple[int, int]:
         """(level, columns its marks take, with the space after) for a heading on this row, else (0, 0).
@@ -31,34 +39,80 @@ class Page(TextArea):
                 return end - start, end + (line[end:end + 1] == " ")
         return 0, 0
 
-    def _hidden(self, row: int) -> int:
-        """Columns hidden at the start of this row on the page."""
-        return 0 if row == self.cursor_location[0] else self._heading(row)[1]
+    def _bold(self, row: int) -> list[tuple[int, int]]:
+        """(start, end) of each **bold** run on this row, stars included. None in code or a box table."""
+        line = self.document[row]
+        if "**" not in line or "\t" in line or line.lstrip().startswith(tables.BOX_START):
+            return []
+        if any(name == "text.literal" for _, _, name in self._highlights.get(row, ())):
+            return []
+        plain = CODE_SPAN.sub(lambda m: " " * len(m.group()), line)     # `**raw**` stays as typed
+        return [m.span() for m in BOLD.finditer(plain)]
+
+    def _hidden(self, row: int) -> list[tuple[int, int]]:
+        """Character ranges on this row the page leaves out."""
+        if row == self.cursor_location[0]:
+            return []
+        marks = self._heading(row)[1]
+        out = [(0, marks)] if marks else []
+        for a, b in self._bold(row):
+            out += [(a, a + 2), (b - 2, b)]
+        return out
+
+    def _section(self, row: int, part: int) -> tuple[int, int]:
+        """Character range of one wrapped part of a row."""
+        cuts = [0, *self.wrapped_document.get_offsets(row), len(self.document[row])]
+        return cuts[part], cuts[part + 1]
 
     def get_line(self, line_index: int) -> Text:
         line = super().get_line(line_index)
         level, marks = self._heading(line_index)
         if level:
             line.stylize(look.heading_style(self.theme, level), marks)
+        for a, b in self._bold(line_index):
+            line.stylize("bold", a + 2, b - 2)
         return line
 
     def _render_line(self, y: int) -> Strip:
         strip = super()._render_line(y)
         info = self.wrapped_document._offset_to_line_info
         y += self.scroll_offset.y
-        if y < len(info) and info[y] and info[y][1] == 0 and (n := self._hidden(info[y][0])):
-            base = self._theme.base_style if self._theme else None
-            strip = strip.crop(n).extend_cell_length(strip.cell_length, base)
-        return strip
+        if y >= len(info) or not info[y] or not (hidden := self._hidden(info[y][0])):
+            return strip
+        row, part = info[y]
+        start, end = self._section(row, part)
+        line = self.document[row]
+        keep, x = [], 0                                    # cell ranges of the strip to keep
+        for c in range(start, end):
+            w = cell_len(line[c])
+            if not any(a <= c < b for a, b in hidden):
+                if keep and keep[-1][1] == x:
+                    keep[-1] = (keep[-1][0], x + w)
+                else:
+                    keep.append((x, x + w))
+            x += w
+        keep.append((x, strip.cell_length))                # the space after the text
+        base = self._theme.base_style if self._theme else None
+        return Strip.join(strip.crop(a, b) for a, b in keep).extend_cell_length(strip.cell_length, base)
 
     def get_target_document_location(self, event: events.MouseEvent) -> tuple[int, int]:
-        # a click on a heading shown without its marks means the letter under the pointer
+        # a click on a line shown without some of its marks means the letter under the pointer
         row, col = super().get_target_document_location(event)
-        n = self._hidden(row)
-        wraps = self.wrapped_document.get_offsets(row)
-        if n and col < (wraps[0] if wraps else len(self.document[row]) + 1):
-            col = min(col + n, len(self.document[row]))
-        return row, col
+        if not (hidden := self._hidden(row)):
+            return row, col
+        info = self.wrapped_document._offset_to_line_info
+        y = event.y + self.scroll_offset.y - self.gutter.top
+        part = info[y][1] if 0 <= y < len(info) and info[y] and info[y][0] == row else 0
+        start, end = self._section(row, part)
+        target = event.x - self.gutter_width + self.scroll_offset.x - self.gutter.left
+        line, x = self.document[row], 0
+        for c in range(start, end):
+            if any(a <= c < b for a, b in hidden):
+                continue
+            x += cell_len(line[c])
+            if target < x:
+                return row, c
+        return row, end
 
     def on_resize(self, event: events.Resize) -> None:
         self.app.page_resized()  # type: ignore[attr-defined]
@@ -195,6 +249,8 @@ class Nori(App):
         self._refit_timer = self.set_timer(0.15, self._refit_tables)
 
     def _refit_tables(self) -> None:
+        if not self.is_running:          # closed before the timer fired
+            return
         editor = self.query_one("#editor", TextArea)
         shown = self._as_page(tables.to_markdown(editor.text))
         if shown == editor.text:

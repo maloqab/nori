@@ -446,3 +446,58 @@ async def test_clicking_a_heading_lands_on_the_letter_clicked(store):
         await pilot.click("#editor", offset=(left + 1, top + 4))         # the "u" of a shown "Sub"
         await pilot.pause()
         assert editor.cursor_location == (4, 4)
+
+
+BOLD = ("Some **bold words** here\n\n```\nkeep **this** as code\n```\n\nuse `**raw**` here\n\n"
+        "🙂 **hi** there\n\n| A | B |\n|---|---|\n| **x** | y |\n\nend")
+
+
+def _row_of(editor, text):
+    return next(i for i in range(editor.document.line_count) if text in editor.document[i])
+
+
+async def test_bold_marks_are_hidden_except_on_the_line_being_edited(store):
+    store.save(store.current(), BOLD)
+    app = Nori(store)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        editor = app.query_one("#editor", TextArea)
+        assert _shown(editor, 0) == "Some bold words here"
+        assert _style_of(editor, 0, "bold words").bold
+        assert not _style_of(editor, 0, "Some").bold
+        assert _shown(editor, 3) == "keep **this** as code"              # code stays as typed
+        assert _shown(editor, 6) == "use `**raw**` here"
+        assert _shown(editor, 8) == "🙂 hi there"
+        table = _row_of(editor, "x")
+        assert "**x**" in _shown(editor, table)                          # a table's borders stay put
+        editor.move_cursor((0, 3))
+        await pilot.pause()
+        assert _shown(editor, 0) == "Some **bold words** here"
+        app.save_now()
+        assert app.note.read() == BOLD
+
+
+async def test_bold_on_a_wrapped_line_is_hidden_in_every_part(store):
+    line = "word " * 14 + "**bold** end and " + "more " * 6 + "**last**"
+    store.save(store.current(), line + "\n\nend")
+    app = Nori(store)
+    async with app.run_test(size=(40, 24)) as pilot:
+        await pilot.pause()
+        editor = app.query_one("#editor", TextArea)
+        parts = len(editor.wrapped_document.get_offsets(0)) + 1
+        assert parts >= 3
+        shown = " ".join(_shown(editor, y) for y in range(parts))
+        assert "**" not in shown
+        assert " ".join(shown.split()) == " ".join(line.replace("**", "").split())
+
+
+async def test_clicking_after_hidden_bold_marks_lands_on_the_letter_clicked(store):
+    store.save(store.current(), "a **b** c\n\nend")
+    app = Nori(store)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        editor = app.query_one("#editor", TextArea)
+        left, top = editor.content_region.x - editor.region.x, editor.content_region.y - editor.region.y
+        await pilot.click("#editor", offset=(left + 4, top))             # the "c" of a shown "a b c"
+        await pilot.pause()
+        assert editor.cursor_location == (0, 8)
