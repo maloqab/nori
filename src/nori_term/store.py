@@ -39,12 +39,18 @@ class Note:
             return ""
 
     @property
-    def title(self) -> str:
+    def heading(self) -> str:
+        """The first line with words, without its '#' marks."""
         for line in self.read().splitlines():
             line = line.strip().lstrip("#").strip()
             if line:
-                return line if len(line) <= TITLE_MAX else line[: TITLE_MAX - 1] + "…"
+                return line
         return "untitled"
+
+    @property
+    def title(self) -> str:
+        h = self.heading
+        return h if len(h) <= TITLE_MAX else h[: TITLE_MAX - 1] + "…"
 
     @property
     def modified(self) -> datetime:
@@ -93,6 +99,13 @@ class Store:
         if not path.is_file():
             return None
         return Note(path, note_id in self._state().get("locked", []))
+
+    def find(self, query: str) -> list[Note]:
+        """Notes a name points to: its file name or exact title, else titles that contain it."""
+        q = query.strip().lower()
+        notes = self.notes()
+        exact = [n for n in notes if q in (n.id.lower(), n.path.stem.lower(), n.heading.lower())]
+        return exact or [n for n in notes if q in n.heading.lower()]
 
     def save(self, note: Note, text: str) -> None:
         if note.read() != text:

@@ -19,6 +19,7 @@ from .store import Note, Store
 
 SAVE_DELAY = 0.4  # seconds of quiet typing before writing to disk
 LOOK_EVERY = 3.0  # seconds between checks of the terminal's wa look (it follows day/night)
+DISK_EVERY = 2.0  # seconds between checks for the open note changing outside Nori
 
 
 BOLD = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
@@ -204,6 +205,7 @@ class Nori(App):
         self.note = self.store.current()
         self._save_timer: Timer | None = None
         self._next_status = "saved"   # what the status says after the next save ("organized · …" once)
+        self._disk = self.note.read()   # the open note as Nori last read or wrote it
 
     # ---- layout -------------------------------------------------------
     def compose(self) -> ComposeResult:
@@ -233,6 +235,7 @@ class Nori(App):
             page.language = "markdown"
         self._apply_look(look.current_look())
         self.set_interval(LOOK_EVERY, self._check_look)
+        self.set_interval(DISK_EVERY, self._sync_disk)
         editor = self.query_one("#editor", TextArea)
         editor.focus()
         editor.move_cursor(editor.document.end)
@@ -353,12 +356,38 @@ class Nori(App):
         self._save_timer = self.set_timer(SAVE_DELAY, self.save_now)
         self._set_status("…")
 
+    def _sync_disk(self) -> None:
+        """Pick up changes made to the open note outside Nori (an agent's `nori --add --to`, Obsidian
+        syncing the other Mac) instead of saving over them."""
+        if not self.note.path.exists():
+            return                                   # gone for a moment (a sync rewriting it)
+        theirs = self.note.read()
+        if theirs == self._disk or (self._disk.strip() and not theirs.strip()):
+            return                                   # unchanged, or emptied mid-write
+        editor = self.query_one("#editor", TextArea)
+        mine = tables.to_markdown(editor.text)
+        # nothing typed since (compared as Nori writes it: its tables may be spelled differently on disk)
+        if mine in (self._disk, tables.to_markdown(self._as_page(self._disk))):
+            row, col = editor.cursor_location
+            editor.load_text(self._as_page(theirs))
+            last = editor.document.line_count - 1
+            editor.move_cursor((min(row, last), min(col, len(editor.document[min(row, last)]))))
+        elif theirs.startswith(self._disk):          # added at the end: keep both
+            editor.insert(self._as_page(theirs[len(self._disk):]), editor.document.end)
+        else:                                        # changed some other way: keep theirs as its own note
+            self.store.new(theirs, make_current=False)
+            self.notify("this note changed elsewhere too; that version is in your notes", timeout=4)
+        self._disk = theirs
+
     def save_now(self) -> None:
         if self._save_timer:
             self._save_timer.stop()
             self._save_timer = None
+        self._sync_disk()
         # the page shows box tables; the file keeps Markdown pipe tables (Obsidian shows those)
-        self.store.save(self.note, tables.to_markdown(self.query_one("#editor", TextArea).text))
+        text = tables.to_markdown(self.query_one("#editor", TextArea).text)
+        self.store.save(self.note, text)
+        self._disk = text
         self._set_status(self._next_status)
         self._next_status = "saved"
 
@@ -368,6 +397,7 @@ class Nori(App):
         if note.id != self.note.id:
             self.store.drop_if_empty(self.note)
         self.note = note
+        self._disk = note.read()
         self.store.set_current(note.id)
         editor = self.query_one("#editor", TextArea)
         editor.load_text(self._as_page(note.read()))
@@ -435,6 +465,7 @@ class Nori(App):
         self.notify("moved to Trash", timeout=1.5)
         if deleting_current:
             self.note = self.store.current()
+            self._disk = self.note.read()
             editor = self.query_one("#editor", TextArea)
             editor.load_text(self._as_page(self.note.read()))
             self._set_status("saved")

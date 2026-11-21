@@ -6,7 +6,19 @@ Type `nori` and a quiet, full-screen notepad opens. Just write. It saves as you 
 nori                 # open the notepad (picks up your last note)
 nori bought milk     # save a quick note without opening anything
 nori --where         # show where notes are saved
+nori --list          # notes: file name and title, newest first
 ```
+
+For agents (and scripts), `--add` writes a whole note, or adds to one:
+
+```sh
+nori --add --title "Agent tests" <<'EOF'
+- Sentinel: replay one week of email
+EOF
+nori --add --to "agent tests" "- QA: one end-to-end run"    # add to the end of a note (file name or title)
+```
+
+An open Nori picks up what was added to its note within a couple of seconds, and never saves over it.
 
 ## Keys
 
