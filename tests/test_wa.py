@@ -310,3 +310,31 @@ async def test_ctrl_t_on_an_already_organized_note_refits_it_without_the_ai(stor
         await pilot.pause()
         text = app.query_one("#editor", TextArea).text
         assert text.startswith("# Server Requirements Request\n\n┌") and "│ Size" in text
+
+
+KEY_VALUE = """Server requirements - what we need from IT
+Size: 4 vCPU, 8 GB memory (same as staging); about 80 GB disk (my estimate)
+System: Ubuntu 24.04, which is what the setup script is written for
+Access: SSH for you, as a normal user with sudo; no root login
+Inbound: Nothing except SSH; the agents open their own connections out
+Backups: Daily, kept at least 7 days"""
+
+
+def test_label_value_lines_become_a_two_column_table_not_csv():
+    import re
+    out = re.sub(r" {2,}", " ", organize.table_markdown(KEY_VALUE))     # ignore column padding
+    assert out.startswith("Server requirements - what we need from IT\n\n| Item")
+    assert "| Size | 4 vCPU, 8 GB memory (same as staging); about 80 GB disk (my estimate) |" in out
+    assert out.count("\n| ") == 7                                   # header, rule, 5 rows
+
+
+def test_urls_times_and_a_lone_label_are_not_label_value_tables():
+    assert organize.table_markdown("see https://x.com\nmeet at 10:30 today\nNote: call back later") is None
+
+
+def test_real_csv_still_is():
+    assert organize.table_markdown("name,qty,price\napples,3,1.20\npears,5,0.90\nkiwi,12,0.40").count("\n| ") == 4
+
+
+def test_the_model_is_told_not_to_escape_characters():
+    assert "escape" in organize.SYSTEM.lower()

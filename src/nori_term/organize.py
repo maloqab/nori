@@ -25,7 +25,9 @@ Fix only the structure:
 - rows and columns (tab- or space-separated, or copied from a web table) → a GitHub pipe table with a header row
 - items → a bullet or numbered list
 - prose → short paragraphs
+- "label: value" lines → a two-column table
 - clearly separate parts → short headings
+Write characters as they are: never add backslash escapes (write *.slack.com, not \\*.slack.com).
 {title}"""
 TITLE_ONLY = """Reply with only a short title (2-6 words) naming what this table is: no quotes, no '#',
 no punctuation at the end, nothing else."""
@@ -127,6 +129,14 @@ def _split_csv(line: str) -> list[str]:
         return [line]
 
 
+LABEL = re.compile(r"^\s*([^:|]{1,40}?):\s+(\S.*)$")      # "Size: 4 vCPU" (a colon then a space: not URLs or times)
+
+
+def _split_label(line: str) -> list[str]:
+    m = LABEL.match(line)
+    return [m.group(1).strip(), m.group(2).strip()] if m and len(m.group(1).split()) <= 5 else [line]
+
+
 def _best_run(rows: list[list[str]]) -> tuple[int, int]:
     """Longest run of consecutive lines with the same number (2+) of cells: (start, length)."""
     best, i = (0, 0), 0
@@ -147,13 +157,27 @@ def table_markdown(text: str) -> str | None:
     if boxed != text:
         return boxed.strip()
     lines = [l for l in text.strip("\n").splitlines()]
+    filled = sum(1 for l in lines if l.strip())
+    labels = [_split_label(l) if l.strip() else [] for l in lines]
+    start, n = _best_run(labels)
+    if n >= 3 and n >= 0.6 * filled:                         # "Label: value" lines → Item | Details
+        rows = [["Item", "Details"]] + labels[start:start + n]
+        before, after = "\n".join(lines[:start]).strip(), "\n".join(lines[start + n:]).strip()
+        table = "\n".join(["| Item | Details |", "|---|---|"] + ["| " + " | ".join(c.replace("|", "\\|") for c in r) + " |" for r in rows[1:]])
+        return "\n\n".join(x for x in (before, align_tables(table), after) if x)
     choice = None
     for split in (_split_tab, _split_spaces, _split_csv):        # thousands commas make CSV the last resort
         rows = [split(l) if l.strip() else [] for l in lines]
         start, n = _best_run(rows)
         if n >= 3 and (choice is None or n > choice[2]):
             cells = [c for r in rows[start:start + n] for c in r]
-            if sum(len(c) for c in cells) / len(cells) <= 40:      # short cells: data, not prose
+            data_like = sum(len(c) for c in cells) / len(cells) <= 40      # short cells: data, not prose
+            if split is _split_csv:
+                # commas are everywhere in sentences: CSV only when every cell is data-sized (<= 6 words)
+                # and the table is most of the paste
+                filled = sum(1 for l in lines if l.strip())
+                data_like = data_like and all(len(c.split()) <= 6 for c in cells) and n >= 0.7 * filled
+            if data_like:
                 choice = (rows, start, n)
     if not choice:
         return None
