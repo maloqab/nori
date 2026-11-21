@@ -255,3 +255,55 @@ async def test_the_page_is_markdown_and_follows_the_look(store, monkeypatch):
         app._apply_look("wa-traditional")
         await pilot.pause()
         assert editor.theme == "wa-traditional"
+
+
+# ---- tables that don't fit the pane become lists ----------------------------------
+SERVER = """# Server Requirements Request
+
+| Item | Ask |
+|---|---|
+| Size | 4 vCPU, 8 GB memory (same as staging); about 80 GB disk (my estimate) |
+| System | Ubuntu 24.04, which is what the setup script is written for |
+| Access | SSH for you, as a normal user with sudo; no root login |
+| Outbound (HTTPS only) | openrouter.ai, slack.com and *.slack.com, api.agentmail.to, api.atlassian.com, github.com |
+| Backups | Daily, kept at least 7 days |"""
+
+
+def test_a_table_that_fits_stays_a_table():
+    md = "| name | qty |\n|---|---|\n| apples | 3 |"
+    assert organize.fit_tables(md, 80) == organize.align_tables(md)
+
+
+def test_a_wide_two_column_table_becomes_label_value_bullets():
+    out = organize.fit_tables(SERVER, 80)
+    assert out.startswith("# Server Requirements Request\n\n- Size: 4 vCPU, 8 GB memory")
+    assert "- Backups: Daily, kept at least 7 days" in out
+    assert "|" not in out and "Item" not in out          # the generic header row goes
+    assert organize.keeps_the_numbers(SERVER, out)
+
+
+def test_a_wide_table_with_more_columns_becomes_one_bullet_per_row():
+    md = ("| Company | Ticker | Note |\n|---|---|---|\n"
+          "| National Bank of Kuwait | NBK | largest lender by assets, listed on the premier market since 1984 |\n"
+          "| Zain | ZAIN | telecom operator present in eight markets across the region and Africa |")
+    out = organize.fit_tables(md, 60)
+    assert out.splitlines()[:3] == ["- National Bank of Kuwait", "  - Ticker: NBK",
+                                    "  - Note: largest lender by assets, listed on the premier market since 1984"]
+    assert "- Zain" in out
+
+
+def test_text_around_a_wide_table_is_untouched():
+    out = organize.fit_tables("intro line\n\n" + SERVER.split("\n\n", 1)[1] + "\n\nafter", 80)
+    assert out.startswith("intro line\n\n- Size:") and out.endswith("\n\nafter")
+
+
+async def test_ctrl_t_on_an_already_organized_note_refits_it_without_the_ai(store, monkeypatch):
+    monkeypatch.setattr(organize, "_claude", lambda *a: pytest.fail("called the AI on organized Markdown"))
+    store.save(store.current(), SERVER)
+    app = Nori(store)
+    async with app.run_test(size=(90, 40)) as pilot:
+        await pilot.press("ctrl+t")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        text = app.query_one("#editor", TextArea).text
+        assert "- Size: 4 vCPU" in text and "|" not in text

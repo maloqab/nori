@@ -35,13 +35,17 @@ def enabled() -> bool:
     return os.environ.get("NORI_AI", "1") != "0"
 
 
+def is_markdown(text: str) -> bool:
+    """Already structured: most lines are table rows, headings or list items."""
+    lines = [l for l in text.strip().splitlines() if l.strip()]
+    marked = sum(bool(re.match(r"\s*(\||#|[-*+] |\d+[.)] )", l)) for l in lines)
+    return bool(lines) and marked >= max(2, len(lines) * 0.6)
+
+
 def should_organize(text: str) -> bool:
     """Worth organizing: tabular or long, and not already Markdown."""
     lines = [l for l in text.strip().splitlines() if l.strip()]
-    if not lines:
-        return False
-    marked = sum(bool(re.match(r"\s*(\||#|[-*+] |\d+[.)] )", l)) for l in lines)
-    if marked >= max(2, len(lines) * 0.6):
+    if not lines or is_markdown(text):
         return False
     tab_rows = sum("\t" in l for l in lines)
     gap_rows = sum(len(re.findall(r"\S {2,}\S", l)) >= 1 for l in lines)
@@ -89,6 +93,41 @@ def align_tables(md: str) -> str:
             continue
         if block:
             out.extend(_align_block(block) if len(block) >= 2 else block)
+            block = []
+        out.append(line)
+    return "\n".join(out[:-1])
+
+
+def _as_list(block: list[str]) -> list[str]:
+    """A table too wide for the page, as a list that wraps cleanly."""
+    table = [_cells(r) for r in block]
+    is_sep = lambda r: all(re.fullmatch(r":?-+:?", c) or c == "" for c in r) and any(c for c in r)
+    header, rows = table[0], [r for r in table[1:] if not is_sep(r)]
+    out = []
+    for r in rows:
+        r = r + [""] * (len(header) - len(r))
+        if len(header) == 2:                                  # label: value
+            out.append(f"- {r[0]}: {r[1]}" if r[1] else f"- {r[0]}")
+        else:                                                 # first cell leads, the rest under it
+            out.append(f"- {r[0]}")
+            out += [f"  - {h}: {c}" for h, c in zip(header[1:], r[1:]) if c]
+    return out
+
+
+def fit_tables(md: str, width: int) -> str:
+    """Pipe tables that fit the page are aligned; wider ones become lists (soft-wrapped rows would
+    break the table apart)."""
+    lines, out, block = md.splitlines(), [], []
+    for line in lines + [""]:
+        if line.lstrip().startswith("|"):
+            block.append(line)
+            continue
+        if block:
+            if len(block) >= 2:
+                aligned = _align_block(block)
+                out.extend(aligned if max(len(l) for l in aligned) <= width else _as_list(block))
+            else:
+                out.extend(block)
             block = []
         out.append(line)
     return "\n".join(out[:-1])
@@ -171,6 +210,8 @@ def _claude(system: str, text: str) -> str | None:
 
 def run(text: str, new_note: bool) -> str | None:
     """Organized Markdown, or None (failed, timed out, or it lost data)."""
+    if is_markdown(text):          # already organized: the app just fits its tables to the page
+        return text
     table = table_markdown(text)
     if table:
         title = _claude(TITLE_ONLY, "\n".join(table.splitlines()[:40]))

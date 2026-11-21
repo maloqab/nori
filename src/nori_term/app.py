@@ -194,13 +194,18 @@ class Nori(App):
             self._set_status("kept as pasted")
             return
         editor.history.checkpoint()          # so Ctrl+Z brings the paste back, not nothing
-        done = editor.replace(organize.align_tables(result), start, end)
+        done = editor.replace(organize.fit_tables(result, self._page_width()), start, end)
         editor.history.checkpoint()
         editor.move_cursor(done.end_location)
         # the replace fires a change; its autosave shows this hint once instead of plain "saved"
         self._next_status = "organized  [dim]· ctrl+z for the original[/]"
         self.save_now()
         self._next_status = "organized  [dim]· ctrl+z for the original[/]"
+
+    def _page_width(self) -> int:
+        """Characters a line can hold on the page before it wraps."""
+        width = self.query_one("#editor", TextArea).content_size.width
+        return max(40, min(84, width - 1)) if width else 84
 
     # ---- saving -------------------------------------------------------
     def _set_status(self, state: str) -> None:
