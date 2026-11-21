@@ -12,7 +12,9 @@ import json
 import os
 import subprocess
 
+from rich.style import Style
 from textual.theme import Theme
+from textual.widgets.text_area import TextAreaTheme
 
 # The four wa palettes (herdr-wa/app/themes/*.json).
 PALETTES = {
@@ -48,6 +50,29 @@ def themes() -> list[Theme]:
             },
         ))
     return out
+
+
+def text_area_theme(name: str) -> TextAreaTheme:
+    """The page's Markdown colors for a look: headings and list marks in the accent, syntax marks muted."""
+    p = PALETTES[name]
+    fg, muted, accent = Style(color=p["fg"]), Style(color=p["muted"]), Style(color=p["accent"])
+    return TextAreaTheme(
+        name=name,
+        base_style=Style(color=p["fg"], bgcolor=p["bg"]),
+        cursor_style=Style(color=p["bg"], bgcolor=p["accent"]),
+        selection_style=Style(bgcolor=p["selection"]),
+        syntax_styles={
+            "heading": Style(color=p["accent"], bold=True),
+            "heading.marker": muted,
+            "list.marker": accent,
+            "punctuation.special": muted,        # table pipes and rules
+            "punctuation.delimiter": muted,
+            "link.label": Style(color=p["accent"], underline=True),
+            "link.uri": muted,
+            "text.literal": Style(color=p["fg"], italic=True),
+            "string.escape": muted,
+        },
+    )
 
 
 def look_from_hc(raw: str) -> str | None:

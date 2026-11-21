@@ -139,3 +139,102 @@ async def test_small_paste_never_calls_the_ai(store, monkeypatch):
         await pilot.pause()
         await app.workers.wait_for_complete()
         assert editor.text == "hello"
+
+
+# ---- tables in code (no AI, lossless at any size) -----------------------------
+CSV40 = "date,ticker,open,close\n" + "\n".join(f"2026-11-{d:02d},NBK,{1 + d / 1000:.3f},{1 + d / 990:.3f}" for d in range(1, 41))
+
+
+def test_csv_becomes_a_table_with_every_row():
+    out = organize.table_markdown(CSV40)
+    rows = [l for l in out.splitlines() if l.startswith("|")]
+    assert len(rows) == 42                                   # header, separator, 40 rows
+    assert "| 2026-11-40 | NBK" in out
+    assert organize.keeps_the_numbers(CSV40, out)
+
+
+def test_quoted_csv_commas_stay_in_their_cell():
+    out = organize.table_markdown('name,city\n"Zain, Group",Kuwait\nNBK,Kuwait\nKFH,Kuwait')
+    assert "| Zain, Group |" in out
+
+
+def test_tab_and_space_aligned_columns_become_tables():
+    tsv = "name\tqty\napples\t3\npears\t5"
+    assert "| apples | 3   |" in organize.table_markdown(tsv)
+    spaced = ("Company    Ticker   Close\nNational Bank of Kuwait   NBK   1.012\n"
+              "Kuwait Finance House  KFH   0.789\nZain   ZAIN   0.468")
+    out = organize.table_markdown(spaced)
+    assert "| National Bank of Kuwait | NBK    | 1.012 |" in out
+
+
+def test_lines_around_the_table_are_kept_as_text():
+    text = "close prices:\nname\tclose\nNBK\t1.012\nKFH\t0.789\nprices in KWD"
+    out = organize.table_markdown(text)
+    assert out.startswith("close prices:\n\n|") and out.endswith("\n\nprices in KWD")
+
+
+def test_prose_is_not_a_table():
+    assert organize.table_markdown("we met on monday, then tuesday, and agreed on prices, terms, dates") is None
+    assert organize.table_markdown("one line\nanother line\nthird line here") is None
+
+
+def test_tables_are_titled_by_the_ai_but_built_by_code(monkeypatch):
+    calls = []
+    monkeypatch.setattr(organize, "_claude", lambda system, text: calls.append(system) or "# NBK daily prices")
+    out = organize.run(CSV40, True)
+    assert out.startswith("# NBK daily prices\n\n|") and out.count("\n| 2026-11-") == 40
+    assert "title" in calls[0].lower() and len(calls) == 1
+
+
+def test_a_table_still_lands_when_the_title_call_fails(monkeypatch):
+    monkeypatch.setattr(organize, "_claude", lambda system, text: None)
+    assert organize.run(CSV40, True).startswith("| date")
+
+
+# ---- Ctrl+T: tidy on demand ------------------------------------------------------
+async def test_ctrl_t_tidies_the_whole_note(store, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(organize, "run", lambda text, new_note: seen.update(args=(text, new_note)) or "# Tidy\n\nok")
+    store.save(store.current(), "messy words")
+    app = Nori(store)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+t")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert seen["args"] == ("messy words", True)
+        assert app.query_one("#editor", TextArea).text == "# Tidy\n\nok"
+
+
+async def test_ctrl_t_tidies_just_the_selection(store, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(organize, "run", lambda text, new_note: seen.update(args=(text, new_note)) or "### Bit")
+    store.save(store.current(), "keep this\nmessy bit")
+    app = Nori(store)
+    async with app.run_test() as pilot:
+        editor = app.query_one("#editor", TextArea)
+        editor.selection = editor.selection.__class__((1, 0), (1, 9))
+        await pilot.press("ctrl+t")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert seen["args"] == ("messy bit", False)
+        assert editor.text == "keep this\n### Bit"
+
+
+# ---- Markdown colored in the wa palette ---------------------------------------
+def test_each_look_has_an_editor_theme_with_accent_headings():
+    t = look.text_area_theme("wa-traditional-night")
+    assert t.name == "wa-traditional-night"
+    assert t.syntax_styles["heading"].color.triplet.hex.upper() == "#C4553C"
+    assert t.syntax_styles["punctuation.special"].color.triplet.hex.upper() == "#A59584"
+
+
+async def test_the_page_is_markdown_and_follows_the_look(store, monkeypatch):
+    monkeypatch.setenv("NORI_THEME", "wa-modern-night")
+    app = Nori(store)
+    async with app.run_test() as pilot:
+        editor = app.query_one("#editor", TextArea)
+        assert editor.language == "markdown"
+        assert app.theme == "wa-modern-night" and editor.theme == "wa-modern-night"
+        app._apply_look("wa-traditional")
+        await pilot.pause()
+        assert editor.theme == "wa-traditional"

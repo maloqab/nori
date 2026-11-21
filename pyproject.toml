@@ -3,7 +3,9 @@ name = "nori"
 version = "0.1.0"
 description = "Nori for the terminal: a quiet notepad that saves as you type."
 requires-python = ">=3.11"
-dependencies = ["textual>=1.0"]
+dependencies = [
+    "textual[syntax]>=1.0",
+]
 
 [project.scripts]
 nori = "nori_term.cli:main"

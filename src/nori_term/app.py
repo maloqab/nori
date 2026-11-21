@@ -96,6 +96,7 @@ class Nori(App):
         Binding("escape", "escape", "close", priority=True),
         Binding("ctrl+o", "toggle_history", "history", priority=True),
         Binding("ctrl+n", "new_note", "new", priority=True),
+        Binding("ctrl+t", "tidy", "tidy", priority=True),
     ]
 
     def __init__(self, store: Store | None = None) -> None:
@@ -122,11 +123,15 @@ class Nori(App):
                     tab_behavior="indent",
                     placeholder="write your thoughts...",
                 )
-                yield Static("esc close · ctrl+n new · ctrl+o notes", id="hints")
+                yield Static("esc close · ctrl+n new · ctrl+o notes · ctrl+t tidy", id="hints")
 
     def on_mount(self) -> None:
+        page = self.query_one("#editor", TextArea)
         for theme in look.themes():
             self.register_theme(theme)
+            page.register_theme(look.text_area_theme(theme.name))
+        if "markdown" in page.available_languages:
+            page.language = "markdown"
         self._apply_look(look.current_look())
         self.set_interval(LOOK_EVERY, self._check_look)
         editor = self.query_one("#editor", TextArea)
@@ -138,6 +143,7 @@ class Nori(App):
     def _apply_look(self, name: str | None) -> None:
         if name and name != self.theme:
             self.theme = name
+            self.query_one("#editor", TextArea).theme = name
 
     def _check_look(self) -> None:
         self.run_worker(self._fetch_look, thread=True, group="look", exclusive=True)
@@ -148,8 +154,20 @@ class Nori(App):
 
     # ---- AI organize ----------------------------------------------------
     def pasted(self, text: str, start, end, was_empty: bool) -> None:
-        if not (organize.enabled() and organize.should_organize(text)):
-            return
+        if organize.enabled() and organize.should_organize(text):
+            self._organize(text, start, end, was_empty)
+
+    def action_tidy(self) -> None:
+        """Ctrl+T: organize the selection, or the whole note."""
+        editor = self.query_one("#editor", TextArea)
+        start, end = sorted((editor.selection.start, editor.selection.end))
+        if start == end:
+            start, end = (0, 0), editor.document.end
+        text = editor.get_text_range(start, end)
+        if text.strip():
+            self._organize(text, start, end, text.strip() == editor.text.strip())
+
+    def _organize(self, text: str, start, end, was_empty: bool) -> None:
         editor = self.query_one("#editor", TextArea)
         snapshot = editor.text
         self._set_status("organizing…")
