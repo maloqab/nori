@@ -94,8 +94,10 @@ async def test_big_paste_is_replaced_by_the_organized_version_and_undo_restores_
         assert seen["args"] == (TABLE, True)
         await pilot.pause(0.6)                      # past the autosave
         assert "ctrl+z" in str(app.query_one("#status").render())
-        assert editor.text.startswith("# Fruit stock")
-        assert "| apples | 3     |" in editor.text or "| apples | 3   |" in editor.text
+        assert editor.text.startswith("# Fruit stock\n\n┌")          # shown as a box table
+        assert "│ apples │ 3   │" in editor.text
+        app.save_now()
+        assert "| apples | 3 |" in app.note.read()                    # the file keeps Markdown
         editor.undo()
         await pilot.pause()
         assert editor.text == TABLE
@@ -257,7 +259,7 @@ async def test_the_page_is_markdown_and_follows_the_look(store, monkeypatch):
         assert editor.theme == "wa-traditional"
 
 
-# ---- tables that don't fit the pane become lists ----------------------------------
+# ---- box tables ---------------------------------------------------------------------
 SERVER = """# Server Requirements Request
 
 | Item | Ask |
@@ -268,33 +270,34 @@ SERVER = """# Server Requirements Request
 | Outbound (HTTPS only) | openrouter.ai, slack.com and *.slack.com, api.agentmail.to, api.atlassian.com, github.com |
 | Backups | Daily, kept at least 7 days |"""
 
-
-def test_a_table_that_fits_stays_a_table():
-    md = "| name | qty |\n|---|---|\n| apples | 3 |"
-    assert organize.fit_tables(md, 80) == organize.align_tables(md)
-
-
-def test_a_wide_two_column_table_becomes_label_value_bullets():
-    out = organize.fit_tables(SERVER, 80)
-    assert out.startswith("# Server Requirements Request\n\n- Size: 4 vCPU, 8 GB memory")
-    assert "- Backups: Daily, kept at least 7 days" in out
-    assert "|" not in out and "Item" not in out          # the generic header row goes
-    assert organize.keeps_the_numbers(SERVER, out)
+CLAUDE_BOX = """┌──────────────────────┬─────────────────────────────────────┐
+│         Item         │                 Ask                 │
+├──────────────────────┼─────────────────────────────────────┤
+│ Size                 │ 4 vCPU, 8 GB memory (same as        │
+│                      │ staging); about 80 GB disk          │
+├──────────────────────┼─────────────────────────────────────┤
+│ Backups              │ Daily, kept at least 7 days         │
+└──────────────────────┴─────────────────────────────────────┘"""
 
 
-def test_a_wide_table_with_more_columns_becomes_one_bullet_per_row():
-    md = ("| Company | Ticker | Note |\n|---|---|---|\n"
-          "| National Bank of Kuwait | NBK | largest lender by assets, listed on the premier market since 1984 |\n"
-          "| Zain | ZAIN | telecom operator present in eight markets across the region and Africa |")
-    out = organize.fit_tables(md, 60)
-    assert out.splitlines()[:3] == ["- National Bank of Kuwait", "  - Ticker: NBK",
-                                    "  - Note: largest lender by assets, listed on the premier market since 1984"]
-    assert "- Zain" in out
+def test_a_box_table_pasted_from_claude_code_is_read_whole_and_titled(monkeypatch):
+    monkeypatch.setattr(organize, "_claude", lambda system, text: "Server requirements")
+    out = organize.run(CLAUDE_BOX, True)
+    assert out.startswith("# Server requirements\n\n| Item | Ask |")
+    assert "| Size | 4 vCPU, 8 GB memory (same as staging); about 80 GB disk |" in out
+    assert organize.should_organize(CLAUDE_BOX)
 
 
-def test_text_around_a_wide_table_is_untouched():
-    out = organize.fit_tables("intro line\n\n" + SERVER.split("\n\n", 1)[1] + "\n\nafter", 80)
-    assert out.startswith("intro line\n\n- Size:") and out.endswith("\n\nafter")
+async def test_a_note_with_a_table_opens_as_a_box_and_saves_as_markdown(store):
+    store.save(store.current(), SERVER)
+    app = Nori(store)
+    async with app.run_test(size=(90, 40)) as pilot:
+        await pilot.pause()
+        text = app.query_one("#editor", TextArea).text
+        assert "┌" in text and "| Size" not in text
+        assert max(len(l) for l in text.splitlines()) <= 84
+        app.save_now()
+        assert app.note.read() .startswith("# Server Requirements Request\n\n| Item | Ask |")
 
 
 async def test_ctrl_t_on_an_already_organized_note_refits_it_without_the_ai(store, monkeypatch):
@@ -306,4 +309,4 @@ async def test_ctrl_t_on_an_already_organized_note_refits_it_without_the_ai(stor
         await app.workers.wait_for_complete()
         await pilot.pause()
         text = app.query_one("#editor", TextArea).text
-        assert "- Size: 4 vCPU" in text and "|" not in text
+        assert text.startswith("# Server Requirements Request\n\n┌") and "│ Size" in text

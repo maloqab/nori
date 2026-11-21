@@ -9,7 +9,7 @@ from textual.containers import Horizontal, Vertical
 from textual.timer import Timer
 from textual.widgets import Input, ListItem, ListView, Static, TextArea
 
-from . import look, organize
+from . import look, organize, tables
 from .store import Note, Store
 
 SAVE_DELAY = 0.4  # seconds of quiet typing before writing to disk
@@ -138,6 +138,17 @@ class Nori(App):
         editor.focus()
         editor.move_cursor(editor.document.end)
         self._set_status("saved")
+        self.call_after_refresh(self._show_tables)     # boxes need the page's width, known after layout
+
+    def _as_page(self, md: str) -> str:
+        return tables.to_display(md, self._page_width())
+
+    def _show_tables(self) -> None:
+        editor = self.query_one("#editor", TextArea)
+        shown = self._as_page(editor.text)
+        if shown != editor.text:
+            editor.load_text(shown)
+            editor.move_cursor(editor.document.end)
 
     # ---- the wa look ---------------------------------------------------
     def _apply_look(self, name: str | None) -> None:
@@ -165,7 +176,8 @@ class Nori(App):
             start, end = (0, 0), editor.document.end
         text = editor.get_text_range(start, end)
         if text.strip():
-            self._organize(text, start, end, text.strip() == editor.text.strip())
+            # the note's own tables are on the page as boxes: hand the organizer Markdown
+            self._organize(tables.to_markdown(text), start, end, text.strip() == editor.text.strip())
 
     def _organize(self, text: str, start, end, was_empty: bool) -> None:
         editor = self.query_one("#editor", TextArea)
@@ -194,7 +206,7 @@ class Nori(App):
             self._set_status("kept as pasted")
             return
         editor.history.checkpoint()          # so Ctrl+Z brings the paste back, not nothing
-        done = editor.replace(organize.fit_tables(result, self._page_width()), start, end)
+        done = editor.replace(self._as_page(organize.align_tables(result)), start, end)
         editor.history.checkpoint()
         editor.move_cursor(done.end_location)
         # the replace fires a change; its autosave shows this hint once instead of plain "saved"
@@ -205,7 +217,7 @@ class Nori(App):
     def _page_width(self) -> int:
         """Characters a line can hold on the page before it wraps."""
         width = self.query_one("#editor", TextArea).content_size.width
-        return max(40, min(84, width - 1)) if width else 84
+        return max(30, width - 1) if width else 84
 
     # ---- saving -------------------------------------------------------
     def _set_status(self, state: str) -> None:
@@ -223,7 +235,8 @@ class Nori(App):
         if self._save_timer:
             self._save_timer.stop()
             self._save_timer = None
-        self.store.save(self.note, self.query_one("#editor", TextArea).text)
+        # the page shows box tables; the file keeps Markdown pipe tables (Obsidian shows those)
+        self.store.save(self.note, tables.to_markdown(self.query_one("#editor", TextArea).text))
         self._set_status(self._next_status)
         self._next_status = "saved"
 
@@ -235,7 +248,7 @@ class Nori(App):
         self.note = note
         self.store.set_current(note.id)
         editor = self.query_one("#editor", TextArea)
-        editor.load_text(note.read())
+        editor.load_text(self._as_page(note.read()))
         editor.move_cursor(editor.document.end)
         self._set_status("saved")
 
@@ -301,7 +314,7 @@ class Nori(App):
         if deleting_current:
             self.note = self.store.current()
             editor = self.query_one("#editor", TextArea)
-            editor.load_text(self.note.read())
+            editor.load_text(self._as_page(self.note.read()))
             self._set_status("saved")
         self._refresh_history(index)
 

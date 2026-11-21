@@ -6,6 +6,8 @@ meanwhile, and Ctrl+Z brings the original back. NORI_AI=0 turns it off.
 
 from __future__ import annotations
 
+from . import tables
+
 import csv
 import io
 import os
@@ -45,6 +47,8 @@ def is_markdown(text: str) -> bool:
 def should_organize(text: str) -> bool:
     """Worth organizing: tabular or long, and not already Markdown."""
     lines = [l for l in text.strip().splitlines() if l.strip()]
+    if tables.to_markdown(text) != text:                     # a box table (copied from Claude Code etc.)
+        return True
     if not lines or is_markdown(text):
         return False
     tab_rows = sum("\t" in l for l in lines)
@@ -98,41 +102,6 @@ def align_tables(md: str) -> str:
     return "\n".join(out[:-1])
 
 
-def _as_list(block: list[str]) -> list[str]:
-    """A table too wide for the page, as a list that wraps cleanly."""
-    table = [_cells(r) for r in block]
-    is_sep = lambda r: all(re.fullmatch(r":?-+:?", c) or c == "" for c in r) and any(c for c in r)
-    header, rows = table[0], [r for r in table[1:] if not is_sep(r)]
-    out = []
-    for r in rows:
-        r = r + [""] * (len(header) - len(r))
-        if len(header) == 2:                                  # label: value
-            out.append(f"- {r[0]}: {r[1]}" if r[1] else f"- {r[0]}")
-        else:                                                 # first cell leads, the rest under it
-            out.append(f"- {r[0]}")
-            out += [f"  - {h}: {c}" for h, c in zip(header[1:], r[1:]) if c]
-    return out
-
-
-def fit_tables(md: str, width: int) -> str:
-    """Pipe tables that fit the page are aligned; wider ones become lists (soft-wrapped rows would
-    break the table apart)."""
-    lines, out, block = md.splitlines(), [], []
-    for line in lines + [""]:
-        if line.lstrip().startswith("|"):
-            block.append(line)
-            continue
-        if block:
-            if len(block) >= 2:
-                aligned = _align_block(block)
-                out.extend(aligned if max(len(l) for l in aligned) <= width else _as_list(block))
-            else:
-                out.extend(block)
-            block = []
-        out.append(line)
-    return "\n".join(out[:-1])
-
-
 def keeps_the_numbers(original: str, organized: str) -> bool:
     """A cheap guard against dropped data: every number in the paste is still there."""
     # a comma is a thousands separator only before exactly three digits ("3,215,880"; not "1.001,1.002")
@@ -174,6 +143,9 @@ def _best_run(rows: list[list[str]]) -> tuple[int, int]:
 def table_markdown(text: str) -> str | None:
     """Delimited data (tab, aligned columns, CSV) as a Markdown table, with lines around it kept as text.
     None when it isn't a table."""
+    boxed = tables.to_markdown(text)                         # box tables pasted from a terminal app
+    if boxed != text:
+        return boxed.strip()
     lines = [l for l in text.strip("\n").splitlines()]
     choice = None
     for split in (_split_tab, _split_spaces, _split_csv):        # thousands commas make CSV the last resort

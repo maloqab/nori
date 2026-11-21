@@ -62,8 +62,8 @@ forces one; outside Herdr it keeps Textual's default look.
 
 ## Organize a paste
 
-Paste a messy table (copied from a web page, tab- or space-separated) or a wall of text, and Nori tidies it
-into Markdown a few seconds later: a pipe table with aligned columns, lists, paragraphs, and a title that
+Paste a messy table (copied from a web page, tab- or space-separated, or a box table copied from Claude
+Code) or a wall of text, and Nori tidies it into Markdown a few seconds later: tables, lists, paragraphs, and a title that
 fits (`#` on a new note, `###` when it's added to one). It never drops or invents content; if any number
 from the paste is missing from the result, the paste stays as it was. Ctrl+Z brings the original back.
 Short pastes are left alone; Ctrl+T tidies the selection, or the whole note, on demand. Clearly delimited
@@ -71,3 +71,9 @@ data (CSV, tab-separated, aligned columns) is turned into a table by code, so it
 any size; the model only names it. Markdown is colored in the look's palette (accent headings, muted marks).
 It runs `claude -p` (haiku by default, `NORI_AI_MODEL` to change it);
 `NORI_AI=0` turns it off.
+
+## Tables
+
+Nori draws tables the way Claude Code does: box borders, cells that wrap inside their column, the table
+fitted to the page. The note file keeps a plain Markdown pipe table, so Obsidian shows a real table too.
+Ctrl+T redraws a note's tables for the current width.
