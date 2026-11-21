@@ -154,3 +154,9 @@ async def test_a_note_with_a_table_written_differently_takes_an_edit_from_elsewh
         await pilot.press("escape")
     assert len(store.notes()) == 1                               # no "changed elsewhere" copy
     assert "| tea | 3 |" in note.read()
+
+
+def test_add_to_with_a_title_matches_the_notes_own_section_level(store, monkeypatch, capsys):
+    note = store.new("# Review\n\n## Tests\n\n- one\n\n## Rules\n\n- two\n", make_current=False)
+    run(monkeypatch, capsys, "--add", "--to", note.id, "--title", "Follow ups", stdin="- ask Talal")
+    assert note.read().endswith("## Rules\n\n- two\n\n## Follow ups\n\n- ask Talal\n")

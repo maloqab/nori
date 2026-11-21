@@ -4,6 +4,7 @@ writes a note Miteb asked for."""
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 
 from .store import Store
@@ -17,7 +18,8 @@ USAGE = """nori: a quiet notepad that saves as you type
 
   nori --add [--title T] [text...]     new note from the text (or stdin)
   nori --add --to NOTE [--title T]     add the text to the end of NOTE
-                                       (its file name or title)
+                                       (its file name or title), under a
+                                       new section T if given
 
 in the notepad:  esc close · ctrl+n new note · ctrl+o your notes
 """
@@ -26,6 +28,12 @@ in the notepad:  esc close · ctrl+n new note · ctrl+o your notes
 def _fail(message: str) -> None:
     print(f"nori: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def _section_marks(note: str) -> str:
+    """A new section's '#'s: the level of the note's last section heading (below its '#' title), else ###."""
+    levels = [len(m.group(1)) for m in re.finditer(r"^(#{2,6}) \S", note, re.M)]
+    return "#" * (levels[-1] if levels else 3)
 
 
 def _add(argv: list[str]) -> None:
@@ -44,9 +52,9 @@ def _add(argv: list[str]) -> None:
             names = "\n".join(f"  {n.id}  ·  {n.heading}" for n in found) or "  (no note matches)"
             _fail(f"--to {a.to!r} must name one note; matches:\n{names}\nuse its file name")
         note = found[0]
-        if a.title:
-            text = f"### {a.title}\n\n{text}"
         old = note.read().rstrip("\n")
+        if a.title:
+            text = f"{_section_marks(old)} {a.title}\n\n{text}"
         store.save(note, (old + "\n\n" if old else "") + text + "\n")
     else:
         if a.title:
