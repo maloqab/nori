@@ -2,16 +2,36 @@
 
 from __future__ import annotations
 
-from textual import on
+from textual import events, on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.timer import Timer
 from textual.widgets import Input, ListItem, ListView, Static, TextArea
 
+from . import look, organize
 from .store import Note, Store
 
 SAVE_DELAY = 0.4  # seconds of quiet typing before writing to disk
+LOOK_EVERY = 3.0  # seconds between checks of the terminal's wa look (it follows day/night)
+
+
+class Page(TextArea):
+    """The editor. A paste lands as-is, then the app may organize it."""
+
+    async def _on_paste(self, event: events.Paste) -> None:
+        # Textual runs every class's handler in turn; this one does the insert, so stop TextArea's.
+        event.prevent_default()
+        event.stop()
+        if self.read_only:
+            return
+        was_empty = not self.text.strip()
+        start = min(self.selection.start, self.selection.end)
+        if result := self._replace_via_keyboard(event.text, *self.selection):
+            self.move_cursor(result.end_location)
+            self.focus()
+            end = result.end_location
+            self.app.pasted(self.get_text_range(start, end), start, end, was_empty)  # type: ignore[attr-defined]
 
 
 class History(ListView):
@@ -83,6 +103,7 @@ class Nori(App):
         self.store = store or Store()
         self.note = self.store.current()
         self._save_timer: Timer | None = None
+        self._next_status = "saved"   # what the status says after the next save ("organized · …" once)
 
     # ---- layout -------------------------------------------------------
     def compose(self) -> ComposeResult:
@@ -93,7 +114,7 @@ class Nori(App):
                 yield Static("enter open · l lock · d delete\n/ search · esc back", id="sidebar-hints")
             with Vertical(id="page"):
                 yield Static(id="status")
-                yield TextArea(
+                yield Page(
                     self.note.read(),
                     id="editor",
                     soft_wrap=True,
@@ -104,15 +125,62 @@ class Nori(App):
                 yield Static("esc close · ctrl+n new · ctrl+o notes", id="hints")
 
     def on_mount(self) -> None:
+        for theme in look.themes():
+            self.register_theme(theme)
+        self._apply_look(look.current_look())
+        self.set_interval(LOOK_EVERY, self._check_look)
         editor = self.query_one("#editor", TextArea)
         editor.focus()
         editor.move_cursor(editor.document.end)
         self._set_status("saved")
 
+    # ---- the wa look ---------------------------------------------------
+    def _apply_look(self, name: str | None) -> None:
+        if name and name != self.theme:
+            self.theme = name
+
+    def _check_look(self) -> None:
+        self.run_worker(self._fetch_look, thread=True, group="look", exclusive=True)
+
+    def _fetch_look(self) -> None:
+        name = look.current_look()
+        self.call_from_thread(self._apply_look, name)
+
+    # ---- AI organize ----------------------------------------------------
+    def pasted(self, text: str, start, end, was_empty: bool) -> None:
+        if not (organize.enabled() and organize.should_organize(text)):
+            return
+        editor = self.query_one("#editor", TextArea)
+        snapshot = editor.text
+        self._set_status("organizing…")
+
+        def work() -> None:
+            result = organize.run(text, was_empty)
+            self.call_from_thread(self._organized, result, start, end, snapshot)
+
+        self.run_worker(work, thread=True, group="organize")
+
+    def _organized(self, result: str | None, start, end, snapshot: str) -> None:
+        editor = self.query_one("#editor", TextArea)
+        if result is None:
+            self._set_status("kept as pasted")
+            return
+        if editor.text != snapshot:          # typed meanwhile: never overwrite their words
+            self._set_status("kept as pasted")
+            return
+        editor.history.checkpoint()          # so Ctrl+Z brings the paste back, not nothing
+        done = editor.replace(organize.align_tables(result), start, end)
+        editor.history.checkpoint()
+        editor.move_cursor(done.end_location)
+        # the replace fires a change; its autosave shows this hint once instead of plain "saved"
+        self._next_status = "organized  [dim]· ctrl+z for the original[/]"
+        self.save_now()
+        self._next_status = "organized  [dim]· ctrl+z for the original[/]"
+
     # ---- saving -------------------------------------------------------
     def _set_status(self, state: str) -> None:
         title = self.note.title if self.note.read().strip() else "new note"
-        self.query_one("#status", Static).update(f"{title}  [dim]· {state}[/]")
+        self.query_one("#status", Static).update(f"[$accent]筆[/]  {title}  [dim]· {state}[/]")
 
     @on(TextArea.Changed, "#editor")
     def _on_type(self) -> None:
@@ -126,7 +194,8 @@ class Nori(App):
             self._save_timer.stop()
             self._save_timer = None
         self.store.save(self.note, self.query_one("#editor", TextArea).text)
-        self._set_status("saved")
+        self._set_status(self._next_status)
+        self._next_status = "saved"
 
     def _open(self, note: Note) -> None:
         """Save the current note, then switch the editor to another one."""

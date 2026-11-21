@@ -53,3 +53,18 @@ Nori started as a Chrome extension: a glassy notepad overlay you summon on any p
 ## License
 
 [MIT](LICENSE)
+
+## In Herdr (the wa look)
+
+Inside Miteb's Herdr setup, Nori takes the look of the space it opens in (Traditional or Modern, day or
+night) from its terminal's `wa.theme` label, and follows the day/night switch. `NORI_THEME=wa-modern-night`
+forces one; outside Herdr it keeps Textual's default look.
+
+## Organize a paste
+
+Paste a messy table (copied from a web page, tab- or space-separated) or a wall of text, and Nori tidies it
+into Markdown a few seconds later: a pipe table with aligned columns, lists, paragraphs, and a title that
+fits (`#` on a new note, `###` when it's added to one). It never drops or invents content; if any number
+from the paste is missing from the result, the paste stays as it was. Ctrl+Z brings the original back.
+Short pastes are left alone. It runs `claude -p` (haiku by default, `NORI_AI_MODEL` to change it);
+`NORI_AI=0` turns it off.
