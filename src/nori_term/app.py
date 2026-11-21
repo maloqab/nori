@@ -19,6 +19,9 @@ LOOK_EVERY = 3.0  # seconds between checks of the terminal's wa look (it follows
 class Page(TextArea):
     """The editor. A paste lands as-is, then the app may organize it."""
 
+    def on_resize(self, event: events.Resize) -> None:
+        self.app.page_resized()  # type: ignore[attr-defined]
+
     async def _on_paste(self, event: events.Paste) -> None:
         # Textual runs every class's handler in turn; this one does the insert, so stop TextArea's.
         event.prevent_default()
@@ -143,6 +146,24 @@ class Nori(App):
     def _as_page(self, md: str) -> str:
         return tables.to_display(md, self._page_width())
 
+    # tables are drawn for the page's width: draw them again when it changes (a split moved, a scrollbar came)
+    def page_resized(self) -> None:
+        if getattr(self, "_refit_timer", None):
+            self._refit_timer.stop()
+        self._refit_timer = self.set_timer(0.15, self._refit_tables)
+
+    def _refit_tables(self) -> None:
+        editor = self.query_one("#editor", TextArea)
+        shown = self._as_page(tables.to_markdown(editor.text))
+        if shown == editor.text:
+            return
+        row, col = editor.cursor_location
+        editor.history.checkpoint()
+        editor.replace(shown, (0, 0), editor.document.end)
+        editor.history.checkpoint()
+        last = editor.document.line_count - 1
+        editor.move_cursor((min(row, last), min(col, len(editor.document[min(row, last)]))))
+
     def _show_tables(self) -> None:
         editor = self.query_one("#editor", TextArea)
         shown = self._as_page(editor.text)
@@ -216,8 +237,13 @@ class Nori(App):
 
     def _page_width(self) -> int:
         """Characters a line can hold on the page before it wraps."""
-        width = self.query_one("#editor", TextArea).content_size.width
-        return max(30, width - 1) if width else 84
+        editor = self.query_one("#editor", TextArea)
+        width = editor.content_size.width
+        if not width:
+            return 84
+        # the content width includes the scrollbar's columns; keep them free even before it shows,
+        # since a tall table brings it in
+        return max(30, width - editor.styles.scrollbar_size_vertical - 1)
 
     # ---- saving -------------------------------------------------------
     def _set_status(self, state: str) -> None:

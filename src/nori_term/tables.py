@@ -7,7 +7,8 @@ pasted from Claude Code or any other terminal app.
 from __future__ import annotations
 
 import re
-import textwrap
+
+from rich.cells import cell_len, chop_cells
 
 H, V = "─", "│"
 BOX_START = ("┌", "│", "├", "└")
@@ -16,8 +17,8 @@ BOX_START = ("┌", "│", "├", "└")
 # ---- drawing ----------------------------------------------------------------------
 def _widths(header: list[str], rows: list[list[str]], width: int) -> list[int]:
     cols = list(zip(header, *rows))
-    natural = [max(len(c) for c in col) for col in cols]
-    floor = [min(n, max(6, max((len(w) for c in col for w in c.split()), default=1))) for n, col in zip(natural, cols)]
+    natural = [max(cell_len(c) for c in col) for col in cols]
+    floor = [min(n, max(6, max((cell_len(w) for c in col for w in c.split()), default=1))) for n, col in zip(natural, cols)]
     room = width - (3 * len(cols) + 1)                     # "│ " + " │" per column, one shared border
     w = natural[:]
     while sum(w) > room:                                   # take from the widest column that can still give
@@ -32,7 +33,24 @@ def _widths(header: list[str], rows: list[list[str]], width: int) -> list[int]:
 
 
 def _wrap(text: str, width: int) -> list[str]:
-    return textwrap.wrap(text, width, break_long_words=True, break_on_hyphens=False) or [""]
+    """Words into lines of at most `width` screen columns (an emoji counts 2); long words are cut."""
+    lines, cur = [], ""
+    for word in text.split():
+        pieces = chop_cells(word, width) if cell_len(word) > width else [word]
+        for piece in pieces:
+            if not cur:
+                cur = piece
+            elif cell_len(cur) + 1 + cell_len(piece) <= width:
+                cur += " " + piece
+            else:
+                lines.append(cur)
+                cur = piece
+    return lines + [cur] if cur else (lines or [""])
+
+
+def _pad(text: str, width: int, center: bool) -> str:
+    gap = max(0, width - cell_len(text))
+    return " " * (gap // 2) + text + " " * (gap - gap // 2) if center else text + " " * gap
 
 
 def render(header: list[str], rows: list[list[str]], width: int) -> str:
@@ -46,7 +64,7 @@ def render(header: list[str], rows: list[list[str]], width: int) -> str:
         out = []
         for i in range(max(len(p) for p in parts)):
             cell = [(p[i] if i < len(p) else "") for p in parts]
-            out.append(V + V.join(" " + (c.center(x) if center else c.ljust(x)) + " " for c, x in zip(cell, w)) + V)
+            out.append(V + V.join(" " + _pad(c, x, center) + " " for c, x in zip(cell, w)) + V)
         return out
 
     lines = [rule("┌", "┬", "┐"), *line_set(header, True)]

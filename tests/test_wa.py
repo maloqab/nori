@@ -338,3 +338,37 @@ def test_real_csv_still_is():
 
 def test_the_model_is_told_not_to_escape_characters():
     assert "escape" in organize.SYSTEM.lower()
+
+
+WIDE = """# Agents
+
+| Agent | Own context? | Own permissions? | Own trigger and human owner? | Verdict |
+|---|---|---|---|---|
+| Demand | Requester emails and attachments | Emails requesters; writes intake records | A new email; Fay screens | ✅ Separate. Live today. |
+| Product Owner | Approved request, Zain pages, the mock-up | Writes PRD and story pages | Discovery approved; you review | ✅ Separate. In testing. Already does the test case writing, which is the right job |"""
+
+
+def _widest(app):
+    from rich.cells import cell_len
+    return max(cell_len(l) for l in app.query_one("#editor", TextArea).text.splitlines())
+
+
+async def test_tables_redraw_when_the_pane_gets_narrower(store):
+    store.save(store.current(), WIDE)
+    app = Nori(store)
+    async with app.run_test(size=(130, 60)) as pilot:
+        await pilot.pause()
+        assert _widest(app) <= app.query_one("#editor", TextArea).wrap_width
+        await pilot.resize_terminal(70, 60)
+        await pilot.pause(0.5)
+        assert _widest(app) <= app.query_one("#editor", TextArea).wrap_width
+        app.save_now()
+        assert "| Demand | Requester emails and attachments |" in app.note.read()   # file unchanged in meaning
+
+
+async def test_a_tall_table_still_fits_once_the_scrollbar_appears(store):
+    store.save(store.current(), WIDE)
+    app = Nori(store)
+    async with app.run_test(size=(80, 12)) as pilot:          # short pane: the table needs a scrollbar
+        await pilot.pause(0.5)
+        assert _widest(app) <= app.query_one("#editor", TextArea).wrap_width

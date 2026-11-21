@@ -65,3 +65,19 @@ def test_a_broken_box_is_left_as_text():
 def test_text_without_tables_is_untouched():
     text = "# Title\n\n- one\n- two"
     assert tables.to_display(text, 40) == text and tables.to_markdown(text) == text
+
+
+def test_emoji_take_two_columns_and_the_box_stays_a_rectangle():
+    from rich.cells import cell_len
+    out = tables.render(["Agent", "Verdict"], [["Demand", "✅ Separate. Live today."], ["PO", "✅ In testing"]], 40)
+    widths = {cell_len(l) for l in out.splitlines()}
+    assert len(widths) == 1 and widths.pop() <= 40
+
+
+def test_five_wide_columns_fit_narrow_widths():
+    from rich.cells import cell_len
+    h = ["Agent", "Own context?", "Own permissions?", "Own trigger and human owner?", "Verdict"]
+    r = [["Product Owner", "Approved request, Zain pages, the mock-up", "Writes PRD and story pages",
+          "Discovery approved; you review", "✅ Separate. In testing. Already does the test case writing"]]
+    for w in (50, 60, 73):
+        assert max(cell_len(l) for l in tables.render(h, r, w).splitlines()) <= w
