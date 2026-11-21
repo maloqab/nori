@@ -30,9 +30,40 @@ def test_unknown_or_missing_label_means_no_wa_look():
     assert look.look_from_hc("not json") is None
 
 
-def test_env_override_wins(monkeypatch):
+def test_nori_theme_is_the_starting_look(monkeypatch):
     monkeypatch.setenv("NORI_THEME", "wa-traditional-night")
-    assert look.current_look() == "wa-traditional-night"
+    assert look.start_look() == "wa-traditional-night"
+
+
+def test_a_bad_nori_theme_is_no_starting_look(monkeypatch):
+    monkeypatch.setenv("NORI_THEME", "batman")
+    assert look.start_look() is None
+
+
+async def test_nori_starts_in_nori_theme_and_then_follows_the_terminal(store, monkeypatch):
+    import threading
+    import time
+    from nori_term import app as app_mod
+    monkeypatch.setenv("NORI_THEME", "wa-traditional-night")
+    asked_on = []
+
+    def label():                                             # `hc get` takes a moment
+        asked_on.append(threading.current_thread() is threading.main_thread())
+        time.sleep(0.4)
+        return "wa-traditional"
+    monkeypatch.setattr(look, "terminal_look", label)
+    app = Nori(store)
+    async with app.run_test() as pilot:
+        assert app.theme == "wa-traditional-night"           # the start, without waiting on hc
+        await pilot.pause(app_mod.LOOK_EVERY + 0.3)
+        assert app.theme == "wa-traditional"
+        assert app.query_one("#editor", TextArea).theme == "wa-traditional"
+    assert asked_on and not any(asked_on)                    # hc is never asked on the UI thread
+
+
+def test_the_terminal_look_is_checked_every_second():
+    from nori_term import app as app_mod
+    assert app_mod.LOOK_EVERY == 1.0
 
 
 def test_four_themes_with_the_wa_palettes():
@@ -501,3 +532,14 @@ async def test_clicking_after_hidden_bold_marks_lands_on_the_letter_clicked(stor
         await pilot.click("#editor", offset=(left + 4, top))             # the "c" of a shown "a b c"
         await pilot.pause()
         assert editor.cursor_location == (0, 8)
+
+
+async def test_a_missed_label_check_keeps_the_look_it_has(store, monkeypatch):
+    from nori_term import app as app_mod
+    monkeypatch.setenv("NORI_THEME", "wa-traditional-night")
+    answers = iter(["wa-traditional"])
+    monkeypatch.setattr(look, "terminal_look", lambda: next(answers, None))   # then hc fails
+    app = Nori(store)
+    async with app.run_test() as pilot:
+        await pilot.pause(2 * app_mod.LOOK_EVERY + 0.3)
+        assert app.theme == "wa-traditional"                 # not back to the starting night look

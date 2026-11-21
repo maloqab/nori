@@ -18,7 +18,7 @@ from . import look, organize, tables
 from .store import Note, Store
 
 SAVE_DELAY = 0.4  # seconds of quiet typing before writing to disk
-LOOK_EVERY = 3.0  # seconds between checks of the terminal's wa look (it follows day/night)
+LOOK_EVERY = 1.0  # seconds between checks of the terminal's wa look (it follows day/night)
 DISK_EVERY = 2.0  # seconds between checks for the open note changing outside Nori
 
 
@@ -233,7 +233,8 @@ class Nori(App):
             page.register_theme(look.text_area_theme(theme.name))
         if "markdown" in page.available_languages:
             page.language = "markdown"
-        self._apply_look(look.current_look())
+        self._apply_look(look.start_look())      # painted first; the terminal's label follows off-thread
+        self._check_look()
         self.set_interval(LOOK_EVERY, self._check_look)
         self.set_interval(DISK_EVERY, self._sync_disk)
         editor = self.query_one("#editor", TextArea)
@@ -282,8 +283,9 @@ class Nori(App):
         self.run_worker(self._fetch_look, thread=True, group="look", exclusive=True)
 
     def _fetch_look(self) -> None:
-        name = look.current_look()
-        self.call_from_thread(self._apply_look, name)
+        # only a look the label names: a missed check (hc slow or failing) keeps the look Nori has
+        if name := look.terminal_look():
+            self.call_from_thread(self._apply_look, name)
 
     # ---- AI organize ----------------------------------------------------
     def pasted(self, text: str, start, end, was_empty: bool) -> None:

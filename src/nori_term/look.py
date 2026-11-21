@@ -2,8 +2,9 @@
 
 Inside Herdr, the wa switcher labels every terminal `wa.theme=custom:wa-<look>[-night]` for its space's
 look and the current appearance. Nori reads that label for its own terminal ($HC_TERMINAL_ID), so it
-matches the space it opens in and follows day/night. NORI_THEME=<name> overrides; outside Herdr
-(or without a wa label) Nori keeps Textual's default look.
+matches the space it opens in and follows day/night. NORI_THEME=<name> is the look Nori starts in
+(painted at once, no waiting on `hc`); the label wins as soon as it names a wa look. With neither,
+Nori keeps Textual's default look.
 """
 
 from __future__ import annotations
@@ -95,9 +96,14 @@ def look_from_hc(raw: str) -> str | None:
     return name if name in PALETTES else None
 
 
-def current_look() -> str | None:
-    if os.environ.get("NORI_THEME") in PALETTES:
-        return os.environ["NORI_THEME"]
+def start_look() -> str | None:
+    """The look to paint first: NORI_THEME, if it names one."""
+    name = os.environ.get("NORI_THEME")
+    return name if name in PALETTES else None
+
+
+def terminal_look() -> str | None:
+    """The wa look this terminal's Herdr label names (runs `hc`: keep it off the UI thread)."""
     term = os.environ.get("HC_TERMINAL_ID")
     if not term:
         return None
