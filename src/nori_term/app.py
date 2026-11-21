@@ -169,7 +169,8 @@ class Nori(App):
 
     def _organize(self, text: str, start, end, was_empty: bool) -> None:
         editor = self.query_one("#editor", TextArea)
-        snapshot = editor.text
+        # what must still be untouched when the result comes back: everything up to the end of the paste
+        snapshot = editor.get_text_range((0, 0), end)
         self._set_status("organizing…")
 
         def work() -> None:
@@ -183,7 +184,13 @@ class Nori(App):
         if result is None:
             self._set_status("kept as pasted")
             return
-        if editor.text != snapshot:          # typed meanwhile: never overwrite their words
+        # Typing after the paste is fine (its position doesn't move the paste); an edit in it or above it
+        # means the words are theirs now: keep everything as it is.
+        try:
+            unchanged = editor.get_text_range((0, 0), end) == snapshot
+        except (ValueError, IndexError):     # the document got shorter than the paste's end
+            unchanged = False
+        if not unchanged:
             self._set_status("kept as pasted")
             return
         editor.history.checkpoint()          # so Ctrl+Z brings the paste back, not nothing

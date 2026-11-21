@@ -101,11 +101,11 @@ async def test_big_paste_is_replaced_by_the_organized_version_and_undo_restores_
         assert editor.text == TABLE
 
 
-async def test_text_typed_over_the_paste_meanwhile_is_never_overwritten(store, monkeypatch):
+async def test_editing_the_pasted_text_meanwhile_keeps_it_as_pasted(store, monkeypatch):
     app = Nori(store)
 
     def slow(text, new_note):
-        app.call_from_thread(lambda: app.query_one("#editor", TextArea).insert("!"))
+        app.call_from_thread(lambda: app.query_one("#editor", TextArea).insert("!", (0, 2)))
         return "# Organized"
 
     monkeypatch.setattr(organize, "run", slow)
@@ -115,7 +115,24 @@ async def test_text_typed_over_the_paste_meanwhile_is_never_overwritten(store, m
         await pilot.pause()
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert "# Organized" not in editor.text and TABLE in editor.text
+        assert "# Organized" not in editor.text and editor.text.startswith("na!me")
+
+
+async def test_typing_after_the_paste_meanwhile_is_kept_and_the_paste_still_organized(store, monkeypatch):
+    app = Nori(store)
+
+    def slow(text, new_note):
+        app.call_from_thread(lambda: app.query_one("#editor", TextArea).insert("\nmy own line"))
+        return "# Organized"
+
+    monkeypatch.setattr(organize, "run", slow)
+    async with app.run_test() as pilot:
+        editor = app.query_one("#editor", TextArea)
+        editor.post_message(events.Paste(TABLE))
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert editor.text == "# Organized\nmy own line"
 
 
 async def test_failed_organize_keeps_the_paste(store, monkeypatch):
