@@ -53,7 +53,8 @@ def themes() -> list[Theme]:
 
 
 def text_area_theme(name: str) -> TextAreaTheme:
-    """The page's Markdown colors for a look: headings and list marks in the accent, syntax marks muted."""
+    """The page's Markdown colors for a look: list marks in the accent, syntax marks muted. Heading text is
+    styled by level in the editor (heading_style), since the grammar gives every level the same name."""
     p = PALETTES[name]
     fg, muted, accent = Style(color=p["fg"]), Style(color=p["muted"]), Style(color=p["accent"])
     return TextAreaTheme(
@@ -62,7 +63,6 @@ def text_area_theme(name: str) -> TextAreaTheme:
         cursor_style=Style(color=p["bg"], bgcolor=p["accent"]),
         selection_style=Style(bgcolor=p["selection"]),
         syntax_styles={
-            "heading": Style(color=p["accent"], bold=True),
             "heading.marker": muted,
             "list.marker": accent,
             "punctuation.special": muted,        # table pipes and rules
@@ -73,6 +73,15 @@ def text_area_theme(name: str) -> TextAreaTheme:
             "string.escape": muted,
         },
     )
+
+
+def heading_style(name: str, level: int) -> Style:
+    """A terminal can't make text bigger, so levels differ by weight, color and a rule:
+    # accent, bold, underlined · ## accent, bold · ### and deeper: bold body text."""
+    p = PALETTES.get(name)
+    if level >= 3:
+        return Style(color=p and p["fg"], bold=True)
+    return Style(color=p and p["accent"], bold=True, underline=level == 1)
 
 
 def look_from_hc(raw: str) -> str | None:

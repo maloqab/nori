@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from rich.text import Text
 from textual import events, on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.strip import Strip
 from textual.timer import Timer
 from textual.widgets import Input, ListItem, ListView, Static, TextArea
 
@@ -17,7 +19,46 @@ LOOK_EVERY = 3.0  # seconds between checks of the terminal's wa look (it follows
 
 
 class Page(TextArea):
-    """The editor. A paste lands as-is, then the app may organize it."""
+    """The editor. A paste lands as-is, then the app may organize it. Headings show without their '#'
+    marks (styled by level instead), except on the line the cursor is on, the way Obsidian does."""
+
+    def _heading(self, row: int) -> tuple[int, int]:
+        """(level, columns its marks take, with the space after) for a heading on this row, else (0, 0).
+        The Markdown grammar decides, so a '# comment' inside a code block isn't one."""
+        line = self.document[row]
+        for start, end, name in self._highlights.get(row, ()):
+            if name == "heading.marker" and end and set(line[start:end]) == {"#"}:
+                return end - start, end + (line[end:end + 1] == " ")
+        return 0, 0
+
+    def _hidden(self, row: int) -> int:
+        """Columns hidden at the start of this row on the page."""
+        return 0 if row == self.cursor_location[0] else self._heading(row)[1]
+
+    def get_line(self, line_index: int) -> Text:
+        line = super().get_line(line_index)
+        level, marks = self._heading(line_index)
+        if level:
+            line.stylize(look.heading_style(self.theme, level), marks)
+        return line
+
+    def _render_line(self, y: int) -> Strip:
+        strip = super()._render_line(y)
+        info = self.wrapped_document._offset_to_line_info
+        y += self.scroll_offset.y
+        if y < len(info) and info[y] and info[y][1] == 0 and (n := self._hidden(info[y][0])):
+            base = self._theme.base_style if self._theme else None
+            strip = strip.crop(n).extend_cell_length(strip.cell_length, base)
+        return strip
+
+    def get_target_document_location(self, event: events.MouseEvent) -> tuple[int, int]:
+        # a click on a heading shown without its marks means the letter under the pointer
+        row, col = super().get_target_document_location(event)
+        n = self._hidden(row)
+        wraps = self.wrapped_document.get_offsets(row)
+        if n and col < (wraps[0] if wraps else len(self.document[row]) + 1):
+            col = min(col + n, len(self.document[row]))
+        return row, col
 
     def on_resize(self, event: events.Resize) -> None:
         self.app.page_resized()  # type: ignore[attr-defined]
@@ -77,6 +118,7 @@ class Nori(App):
     #status { height: 1; padding: 0 2; color: $text-muted; margin-top: 1; }
     #editor {
         height: 1fr; border: none; padding: 1 2; background: $background;
+        scrollbar-size-vertical: 0;     /* it still scrolls; a bar would box the page in */
     }
     #editor:focus { border: none; background-tint: transparent; }
     #editor .text-area--cursor-line { background: transparent; }
@@ -146,7 +188,7 @@ class Nori(App):
     def _as_page(self, md: str) -> str:
         return tables.to_display(md, self._page_width())
 
-    # tables are drawn for the page's width: draw them again when it changes (a split moved, a scrollbar came)
+    # tables are drawn for the page's width: draw them again when it changes (a split moved)
     def page_resized(self) -> None:
         if getattr(self, "_refit_timer", None):
             self._refit_timer.stop()
@@ -241,9 +283,7 @@ class Nori(App):
         width = editor.content_size.width
         if not width:
             return 84
-        # the content width includes the scrollbar's columns; keep them free even before it shows,
-        # since a tall table brings it in
-        return max(30, width - editor.styles.scrollbar_size_vertical - 1)
+        return max(30, width - 1)      # one column for the cursor after a line's last character
 
     # ---- saving -------------------------------------------------------
     def _set_status(self, state: str) -> None:

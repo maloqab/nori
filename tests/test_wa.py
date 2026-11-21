@@ -243,7 +243,7 @@ async def test_ctrl_t_tidies_just_the_selection(store, monkeypatch):
 def test_each_look_has_an_editor_theme_with_accent_headings():
     t = look.text_area_theme("wa-traditional-night")
     assert t.name == "wa-traditional-night"
-    assert t.syntax_styles["heading"].color.triplet.hex.upper() == "#C4553C"
+    assert look.heading_style("wa-traditional-night", 2).color.triplet.hex.upper() == "#C4553C"
     assert t.syntax_styles["punctuation.special"].color.triplet.hex.upper() == "#A59584"
 
 
@@ -372,3 +372,77 @@ async def test_a_tall_table_still_fits_once_the_scrollbar_appears(store):
     async with app.run_test(size=(80, 12)) as pilot:          # short pane: the table needs a scrollbar
         await pilot.pause(0.5)
         assert _widest(app) <= app.query_one("#editor", TextArea).wrap_width
+
+
+# ---- the page: no scrollbar, headings that look like headings --------------------------
+async def test_the_page_has_no_scrollbar_even_when_the_note_is_long(store):
+    store.save(store.current(), "\n".join(f"line {i}" for i in range(200)))
+    app = Nori(store)
+    async with app.run_test(size=(80, 20)) as pilot:
+        await pilot.pause()
+        editor = app.query_one("#editor", TextArea)
+        assert editor.max_scroll_y > 0                                   # it still scrolls
+        assert editor.scrollable_content_region.width == editor.region.width - 4   # only the padding, no bar
+
+
+HEADINGS = "# Title\n\nbody\n\n## Sub\n\n### Small\n\n```sh\n# comment\n```\n\nend"
+
+
+def _shown(editor, row):
+    """What the page shows for a document row (rows don't wrap or scroll in these tests)."""
+    return editor.render_line(row).text.rstrip()
+
+
+def _style_of(editor, row, word):
+    strip = editor.render_line(row)
+    x = 0
+    for seg in strip:
+        if word in seg.text:
+            return seg.style
+        x += len(seg.text)
+    raise AssertionError(f"{word!r} not on row {row}: {strip.text!r}")
+
+
+async def test_heading_marks_are_hidden_except_on_the_line_being_edited(store, monkeypatch):
+    monkeypatch.setenv("NORI_THEME", "wa-traditional-night")
+    store.save(store.current(), HEADINGS)
+    app = Nori(store)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        editor = app.query_one("#editor", TextArea)
+        assert _shown(editor, 0) == "Title"
+        assert _shown(editor, 4) == "Sub"
+        assert _shown(editor, 6) == "Small"
+        assert _shown(editor, 9) == "# comment"                          # code, not a heading
+        editor.move_cursor((4, 6))
+        await pilot.pause()
+        assert _shown(editor, 4) == "## Sub"                             # editing it: marks back
+        assert _shown(editor, 0) == "Title"
+        app.save_now()
+        assert app.note.read() == HEADINGS                               # the file keeps the marks
+
+
+async def test_heading_levels_look_different(store, monkeypatch):
+    monkeypatch.setenv("NORI_THEME", "wa-traditional-night")
+    store.save(store.current(), HEADINGS)
+    app = Nori(store)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        editor = app.query_one("#editor", TextArea)
+        h1, h2, h3 = (_style_of(editor, r, w) for r, w in ((0, "Title"), (4, "Sub"), (6, "Small")))
+        assert h1.bold and h2.bold and h3.bold
+        assert h1.color.triplet.hex.upper() == "#C4553C" == h2.color.triplet.hex.upper()
+        assert h3.color.triplet.hex.upper() == "#EFE6D8"                 # body text color
+        assert h1.underline and not h2.underline
+
+
+async def test_clicking_a_heading_lands_on_the_letter_clicked(store):
+    store.save(store.current(), HEADINGS)
+    app = Nori(store)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        editor = app.query_one("#editor", TextArea)
+        left, top = editor.content_region.x - editor.region.x, editor.content_region.y - editor.region.y
+        await pilot.click("#editor", offset=(left + 1, top + 4))         # the "u" of a shown "Sub"
+        await pilot.pause()
+        assert editor.cursor_location == (4, 4)
